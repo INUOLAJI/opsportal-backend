@@ -1,0 +1,29 @@
+# --- Core ---------------------------------------------------------------
+Django==5.1.4
+python-dotenv==1.0.1
+
+# --- REST API + Auth ------------------------------------------------------
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.3.1
+django-cors-headers==4.6.0
+
+# --- Database --------------------------------------------------------------
+# psycopg2-binary doesn't ship pre-built wheels for very new Python versions
+# (e.g. 3.13/3.14), which forces a from-source build requiring a C compiler
+# and PostgreSQL dev headers — psycopg (v3) has current wheels and works as
+# a drop-in for Django's 'django.db.backends.postgresql' engine, no
+# settings.py changes needed.
+psycopg[binary]>=3.2.10,<3.4
+
+# --- File storage (Cloudinary) ---------------------------------------------
+django-cloudinary-storage==0.3.0
+cloudinary==1.41.0
+
+# --- Real-time / WebSockets (Channels) --------------------------------------
+channels==4.2.0
+channels_redis==4.2.1
+daphne==4.1.2
+
+# --- Production server (only needed if you deploy the HTTP side separately
+# from the ASGI/Channels process — otherwise daphne alone covers both) -------
+gunicorn==23.0.0

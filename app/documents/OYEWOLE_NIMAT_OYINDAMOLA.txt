@@ -1,0 +1,42 @@
+PREPARED BY:OYEWOLE NIMAT OYINDAMOLA
+MARTIC NUMBER: 25/16124 
+DEPARTMENT:NURSING SCIENCE 
+COURSE:COS 102 ASSIGNMENT
+
+QUESTION 1;
+
+PSUEDOCODE:
+START
+    INPUT length
+    INPUT width
+    COMPUTE area = length * width
+    OUTPUT area
+END
+
+PYTHON CODE:
+length = float(input("Enter the length: "))
+width = float(input("Enter the width: "))
+
+area = length * width
+
+print("The area is:", area)
+
+QUESTION 2;
+
+PSUEDOCODE:
+START
+    INPUT score
+    IF score >= 40 THEN
+        OUTPUT "Pass"
+    ELSE
+        OUTPUT "Fail"
+    ENDIF
+END
+
+PYTHON CODE:
+score = float(input("Enter the student's score: "))
+
+if score >= 40:
+    print("Result: Pass")
+else:
+    print("Result: Fail")

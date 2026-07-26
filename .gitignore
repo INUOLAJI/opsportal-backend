@@ -1,0 +1,62 @@
+# ==========================================
+# Python & Virtual Environments
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environment folder names commonly used
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# ==========================================
+# Environment Variables & Secrets
+# ==========================================
+# NEVER commit secret keys, API credentials, or passwords
+.env
+.env.local
+.env.*.local
+*.env
+
+# ==========================================
+# Django Specific Files
+# ==========================================
+# Static and media files generated locally
+/staticfiles/
+/static_root/
+/media/
+/media_root/
+
+# Local databases (SQLite)
+*.sqlite3
+*.db3
+*.sqlite
+
+# Django log files
+*.log
+local_settings.py
+
+# ==========================================
+# Testing & Coverage
+# ==========================================
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+.noserc
+
+# ==========================================
+# IDEs & System Files
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
