@@ -261,6 +261,29 @@ class ActivityLogListView(generics.ListAPIView):
         return ActivityLog.objects.filter(user=user)[:20]
 
 
+class ActivityMarkAllReadView(generics.GenericAPIView):
+    """
+    POST /api/activity/mark-all-read/
+
+    Marks every activity entry currently visible to this user (same scoping
+    as ActivityLogListView) as read by them, specifically. Doesn't affect
+    other users' read state on the same shared entries.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if _is_admin(user):
+            queryset = ActivityLog.objects.all()[:20]
+        else:
+            queryset = ActivityLog.objects.filter(user=user)[:20]
+
+        for activity in queryset:
+            activity.read_by.add(user)
+
+        return Response({"detail": "All caught up."}, status=status.HTTP_200_OK)
+
+
 # ---------------------------------------------------------------------------
 # BOOKINGS
 # ---------------------------------------------------------------------------
@@ -302,7 +325,7 @@ class DocumentListCreateView(generics.ListCreateAPIView):
         user = self.request.user
         if user.role == 'admin' or user.is_superuser:
             return Document.objects.all()
-        return Document.objects.filter(uploaded_by=user)
+        return Document.objects.filter(uploaded_by=user) | Document.objects.filter(assigned_to=user)
 
     def perform_create(self, serializer):
         serializer.save(uploaded_by=self.request.user)
@@ -316,7 +339,7 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
         user = self.request.user
         if user.role == 'admin' or user.is_superuser:
             return Document.objects.all()
-        return Document.objects.filter(uploaded_by=user)
+        return Document.objects.filter(uploaded_by=user) | Document.objects.filter(assigned_to=user) | Document.objects.filter(assigned_to=user)
 
 
 # ---------------------------------------------------------------------------

@@ -31,7 +31,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'email', 'full_name', 'role', 'date_joined']
+        fields = ['id', 'email', 'full_name', 'role', 'is_active', 'date_joined']
         read_only_fields = ['id', 'date_joined']
 
 
@@ -43,7 +43,7 @@ class TaskSerializer(serializers.ModelSerializer):
         model = Task
         fields = [
             'id', 'title', 'tag', 'assignee', 'assignee_name', 'assignee_initials',
-            'status', 'completion_requested', 'due_date', 'created_by', 'created_at', 'updated_at'
+            'status', 'priority', 'completion_requested', 'due_date', 'created_by', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
 
@@ -51,11 +51,21 @@ class TaskSerializer(serializers.ModelSerializer):
 class ActivityLogSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.full_name', read_only=True)
     user_initials = serializers.CharField(source='user.initials', read_only=True)
+    is_read = serializers.SerializerMethodField()
 
     class Meta:
         model = ActivityLog
-        fields = ['id', 'user', 'user_name', 'user_initials', 'action', 'related_task', 'created_at']
+        fields = ['id', 'user', 'user_name', 'user_initials', 'action', 'related_task', 'created_at', 'is_read']
         read_only_fields = ['user', 'created_at']
+
+    def get_is_read(self, obj):
+        request = self.context.get('request')
+        # Freshly-created activities broadcast over WebSocket are serialized
+        # without a request in context — treat those as unread by default,
+        # which is correct since nobody has seen them yet.
+        if not request or not request.user or not request.user.is_authenticated:
+            return False
+        return obj.read_by.filter(pk=request.user.pk).exists()
 
 
 class BookingSerializer(serializers.ModelSerializer):
@@ -72,11 +82,14 @@ class BookingSerializer(serializers.ModelSerializer):
 
 class DocumentSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.full_name', read_only=True)
+    assigned_to_initials = serializers.CharField(source='assigned_to.initials', read_only=True)
 
     class Meta:
         model = Document
         fields = [
-            'id', 'uploaded_by', 'uploaded_by_name', 'title', 'category', 'file',
+            'id', 'uploaded_by', 'uploaded_by_name', 'assigned_to', 'assigned_to_name',
+            'assigned_to_initials', 'title', 'category', 'file',
             'file_size_mb', 'audit_notice', 'uploaded_at', 'updated_at'
         ]
         read_only_fields = ['uploaded_by', 'file_size_mb', 'uploaded_at', 'updated_at']

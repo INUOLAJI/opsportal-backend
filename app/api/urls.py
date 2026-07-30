@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     register_user, signin_user, UserListView,
     TaskListCreateView, TaskDetailView, RequestTaskCompletionView,
-    ActivityLogListView,
+    ActivityLogListView, ActivityMarkAllReadView,
     BookingListCreateView, BookingDetailView,
     DocumentListCreateView, DocumentDetailView,
     InvoiceListCreateView, InvoiceDetailView,
@@ -18,6 +18,7 @@ urlpatterns = [
     path('tasks/<int:pk>/request-completion/', RequestTaskCompletionView.as_view(), name='task-request-completion'),
 
     path('activity/', ActivityLogListView.as_view(), name='activity-list'),
+    path('activity/mark-all-read/', ActivityMarkAllReadView.as_view(), name='activity-mark-all-read'),
 
     path('bookings/', BookingListCreateView.as_view(), name='booking-list'),
     path('bookings/<int:pk>/', BookingDetailView.as_view(), name='booking-detail'),

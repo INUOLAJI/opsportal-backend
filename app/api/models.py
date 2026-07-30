@@ -4,9 +4,9 @@ from django.conf import settings
 from cloudinary_storage.storage import RawMediaCloudinaryStorage
 
 
-# ---------------------------------------------------------------------------
+
 # USER
-# ---------------------------------------------------------------------------
+
 
 class CustomUserManager(BaseUserManager):
     def create_user(self, email, full_name, password=None, role='staff', **extra_fields):
@@ -51,9 +51,9 @@ class User(AbstractBaseUser, PermissionsMixin):
         return ''.join(p[0].upper() for p in parts[:2]) if parts else self.email[0].upper()
 
 
-# ---------------------------------------------------------------------------
+
 # TASKS  (internal to-dos — separate from client Bookings)
-# ---------------------------------------------------------------------------
+
 
 class Task(models.Model):
     STATUS_CHOICES = (
@@ -63,15 +63,22 @@ class Task(models.Model):
         ('complete', 'Complete'),
     )
 
+    PRIORITY_CHOICES = (
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+        ('urgent', 'Urgent'),
+    )
+
     title = models.CharField(max_length=255)
-    tag = models.CharField(max_length=50, blank=True)  # e.g. Backend, Security, UI/UX
+    tag = models.CharField(max_length=50, blank=True)  
     assignee = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='assigned_tasks'
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    # Set by an assignee (staff) to flag "I believe this is done" without letting them
-    # change status directly — an admin still has to confirm via PATCH status=complete.
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
+
     completion_requested = models.BooleanField(default=False)
     due_date = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
@@ -88,9 +95,9 @@ class Task(models.Model):
         return self.title
 
 
-# ---------------------------------------------------------------------------
+
 # ACTIVITY LOG  (drives the "Team Efficiency Feed")
-# ---------------------------------------------------------------------------
+
 
 class ActivityLog(models.Model):
     user = models.ForeignKey(
@@ -102,6 +109,10 @@ class ActivityLog(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    read_by = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, related_name='read_activity_logs', blank=True
+    )
+
     class Meta:
         ordering = ['-created_at']
 
@@ -109,9 +120,9 @@ class ActivityLog(models.Model):
         return f"{self.user.full_name}: {self.action}"
 
 
-# ---------------------------------------------------------------------------
+
 # BOOKINGS  (client self-scheduling)
-# ---------------------------------------------------------------------------
+
 
 class Booking(models.Model):
     STATUS_CHOICES = (
@@ -138,13 +149,18 @@ class Booking(models.Model):
         return f"{self.service_name} - {self.client.full_name} ({self.scheduled_at:%Y-%m-%d %H:%M})"
 
 
-# ---------------------------------------------------------------------------
+
 # DOCUMENTS  (Cloudinary uploads)
-# ---------------------------------------------------------------------------
+
 
 class Document(models.Model):
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='documents'
+    )
+    
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='assigned_documents'
     )
     title = models.CharField(max_length=255)
     category = models.CharField(max_length=100, blank=True)  # e.g. Architecture Guides, Security Protocols

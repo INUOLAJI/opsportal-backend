@@ -14,7 +14,8 @@ class IsAdminUser(permissions.BasePermission):
 
 class IsOwnerOrAdmin(permissions.BasePermission):
     """
-    Object-level permission to only allow owners of an object or admins to view/edit it.
+    Object-level permission to only allow owners/assignees of an object or
+    admins to view/edit it.
     """
     def has_object_permission(self, request, view, obj):
         if not request.user or not request.user.is_authenticated:
@@ -23,16 +24,21 @@ class IsOwnerOrAdmin(permissions.BasePermission):
         if request.user.role == 'admin' or request.user.is_superuser:
             return True
 
-        # Check common ownership attribute names
-        if hasattr(obj, 'client'):
-            return obj.client == request.user
-        if hasattr(obj, 'uploaded_by'):
-            return obj.uploaded_by == request.user
-        if hasattr(obj, 'created_by'):
-            return obj.created_by == request.user
-        if hasattr(obj, 'user'):
-            return obj.user == request.user
-        if hasattr(obj, 'assignee'):
-            return obj.assignee == request.user
+        # Check every applicable ownership/assignment attribute and grant
+        # access if ANY of them match — don't stop at the first one found.
+        # (A Document has both uploaded_by and assigned_to; either one
+        # should grant access. The old version returned on the first
+        # hasattr() match even when it was False, so an assigned-but-not-
+        # uploading staff member was incorrectly denied.)
+        owner_fields = ['client', 'uploaded_by', 'created_by', 'user']
+        for field in owner_fields:
+            if hasattr(obj, field) and getattr(obj, field) == request.user:
+                return True
+
+        if hasattr(obj, 'assigned_to') and obj.assigned_to == request.user:
+            return True
+
+        if hasattr(obj, 'assignee') and obj.assignee == request.user:
+            return True
 
         return False
