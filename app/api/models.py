@@ -4,9 +4,9 @@ from django.conf import settings
 from cloudinary_storage.storage import RawMediaCloudinaryStorage
 
 
-
+# ---------------------------------------------------------------------------
 # USER
-
+# ---------------------------------------------------------------------------
 
 class CustomUserManager(BaseUserManager):
     def create_user(self, email, full_name, password=None, role='staff', **extra_fields):
@@ -51,9 +51,9 @@ class User(AbstractBaseUser, PermissionsMixin):
         return ''.join(p[0].upper() for p in parts[:2]) if parts else self.email[0].upper()
 
 
-
+# ---------------------------------------------------------------------------
 # TASKS  (internal to-dos — separate from client Bookings)
-
+# ---------------------------------------------------------------------------
 
 class Task(models.Model):
     STATUS_CHOICES = (
@@ -71,14 +71,15 @@ class Task(models.Model):
     )
 
     title = models.CharField(max_length=255)
-    tag = models.CharField(max_length=50, blank=True)  
+    tag = models.CharField(max_length=50, blank=True)  # e.g. Backend, Security, UI/UX
     assignee = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='assigned_tasks'
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
-
+    # Set by an assignee (staff) to flag "I believe this is done" without letting them
+    # change status directly — an admin still has to confirm via PATCH status=complete.
     completion_requested = models.BooleanField(default=False)
     due_date = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
@@ -95,9 +96,9 @@ class Task(models.Model):
         return self.title
 
 
-
+# ---------------------------------------------------------------------------
 # ACTIVITY LOG  (drives the "Team Efficiency Feed")
-
+# ---------------------------------------------------------------------------
 
 class ActivityLog(models.Model):
     user = models.ForeignKey(
@@ -108,7 +109,9 @@ class ActivityLog(models.Model):
         Task, on_delete=models.SET_NULL, null=True, blank=True, related_name='activities'
     )
     created_at = models.DateTimeField(auto_now_add=True)
-
+    # Per-user read tracking — needed because the same activity entries can be
+    # viewed by multiple admins independently (each has their own read state),
+    # so a single boolean on the model wouldn't work.
     read_by = models.ManyToManyField(
         settings.AUTH_USER_MODEL, related_name='read_activity_logs', blank=True
     )
@@ -120,9 +123,9 @@ class ActivityLog(models.Model):
         return f"{self.user.full_name}: {self.action}"
 
 
-
+# ---------------------------------------------------------------------------
 # BOOKINGS  (client self-scheduling)
-
+# ---------------------------------------------------------------------------
 
 class Booking(models.Model):
     STATUS_CHOICES = (
@@ -149,15 +152,16 @@ class Booking(models.Model):
         return f"{self.service_name} - {self.client.full_name} ({self.scheduled_at:%Y-%m-%d %H:%M})"
 
 
-
+# ---------------------------------------------------------------------------
 # DOCUMENTS  (Cloudinary uploads)
-
+# ---------------------------------------------------------------------------
 
 class Document(models.Model):
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='documents'
     )
-    
+    # Lets an admin share a document directly into a specific staff member's
+    # view, separate from who actually uploaded it — mirrors Task.assignee.
     assigned_to = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='assigned_documents'
@@ -214,3 +218,51 @@ class Invoice(models.Model):
 
     def __str__(self):
         return f"Invoice #{self.id} - {self.client.full_name} (${self.amount})"
+
+
+# ---------------------------------------------------------------------------
+# PLATFORM SETTINGS  (single row — global ops config, admin-editable)
+# ---------------------------------------------------------------------------
+
+class PlatformSettings(models.Model):
+    ENV_CHOICES = (
+        ('prod', 'Production (Live Webhooks)'),
+        ('staging', 'Staging Canary'),
+        ('dev', 'Development Sandbox'),
+    )
+
+    workspace_title = models.CharField(max_length=255, default='OpsPortal Enterprise')
+    environment_stage = models.CharField(max_length=20, choices=ENV_CHOICES, default='prod')
+    fallback_api_url = models.URLField(blank=True, default='')
+
+    email_alerts_enabled = models.BooleanField(default=True)
+    slack_webhooks_enabled = models.BooleanField(default=False)
+    mfa_enforced = models.BooleanField(default=True)
+
+    # Set only by the rotate-secret endpoint — never directly editable.
+    secret_key_rotated_at = models.DateTimeField(null=True, blank=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='+'
+    )
+
+    class Meta:
+        verbose_name = 'Platform Settings'
+        verbose_name_plural = 'Platform Settings'
+
+    def __str__(self):
+        return 'Platform Settings'
+
+    # Enforced as a true singleton: always load/update row pk=1, creating it
+    # with defaults on first access rather than requiring a fixture or a
+    # manual admin step before the Settings page can load.
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)

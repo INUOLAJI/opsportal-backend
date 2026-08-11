@@ -1,6 +1,6 @@
 import os
 from rest_framework import serializers
-from .models import User, Task, ActivityLog, Booking, Document, Invoice
+from .models import User, Task, ActivityLog, Booking, Document, Invoice, PlatformSettings
 
 # Max allowed upload size: 10MB
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
@@ -115,3 +115,16 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'status', 'due_date', 'created_at', 'updated_at'
         ]
         read_only_fields = ['client', 'created_at', 'updated_at']
+
+
+class PlatformSettingsSerializer(serializers.ModelSerializer):
+    updated_by_name = serializers.CharField(source='updated_by.full_name', read_only=True)
+
+    class Meta:
+        model = PlatformSettings
+        fields = [
+            'workspace_title', 'environment_stage', 'fallback_api_url',
+            'email_alerts_enabled', 'slack_webhooks_enabled', 'mfa_enforced',
+            'secret_key_rotated_at', 'updated_at', 'updated_by', 'updated_by_name',
+        ]
+        read_only_fields = ['secret_key_rotated_at', 'updated_at', 'updated_by']

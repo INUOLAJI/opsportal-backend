@@ -1,0 +1,1391 @@
+openapi: 3.0.3
+info:
+  title: OpsPortal API
+  version: 1.0.0
+  description: API endpoints for authentication, tasks, activity, bookings, documents,
+    invoices, and platform settings.
+paths:
+  /api/activity/:
+    get:
+      operationId: api_activity_list
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActivityLog'
+          description: ''
+  /api/activity/mark-all-read/:
+    post:
+      operationId: api_activity_mark_all_read_create
+      description: |-
+        POST /api/activity/mark-all-read/
+
+        Marks every activity entry currently visible to this user (same scoping
+        as ActivityLogListView) as read by them, specifically. Doesn't affect
+        other users' read state on the same shared entries.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityLog'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ActivityLog'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ActivityLog'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: All caught up.
+  /api/auth/signin/:
+    post:
+      operationId: api_auth_signin_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Register'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Register'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Register'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: Authenticated successfully
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid credentials
+  /api/auth/signup/:
+    post:
+      operationId: api_auth_signup_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Register'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Register'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Register'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '201':
+          description: Account created successfully
+        '400':
+          description: Validation error
+  /api/auth/token/refresh/:
+    post:
+      operationId: api_auth_token_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/bookings/:
+    get:
+      operationId: api_bookings_list
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+          description: ''
+    post:
+      operationId: api_bookings_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Booking'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Booking'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Booking'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+          description: ''
+  /api/bookings/{id}/:
+    get:
+      operationId: api_bookings_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+          description: ''
+    put:
+      operationId: api_bookings_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Booking'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Booking'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Booking'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+          description: ''
+    patch:
+      operationId: api_bookings_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedBooking'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedBooking'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedBooking'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+          description: ''
+    delete:
+      operationId: api_bookings_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/documents/:
+    get:
+      operationId: api_documents_list
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Document'
+          description: ''
+    post:
+      operationId: api_documents_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Document'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Document'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Document'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+          description: ''
+  /api/documents/{id}/:
+    get:
+      operationId: api_documents_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+          description: ''
+    put:
+      operationId: api_documents_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Document'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Document'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Document'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+          description: ''
+    patch:
+      operationId: api_documents_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDocument'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDocument'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDocument'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+          description: ''
+    delete:
+      operationId: api_documents_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/invoices/:
+    get:
+      operationId: api_invoices_list
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invoice'
+          description: ''
+    post:
+      operationId: api_invoices_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Invoice'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Invoice'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Invoice'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+          description: ''
+  /api/invoices/{id}/:
+    get:
+      operationId: api_invoices_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+          description: ''
+    put:
+      operationId: api_invoices_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Invoice'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Invoice'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Invoice'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+          description: ''
+    patch:
+      operationId: api_invoices_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedInvoice'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedInvoice'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedInvoice'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+          description: ''
+    delete:
+      operationId: api_invoices_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/settings/:
+    get:
+      operationId: api_settings_retrieve
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettings'
+          description: ''
+    put:
+      operationId: api_settings_update
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformSettings'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlatformSettings'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlatformSettings'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettings'
+          description: ''
+    patch:
+      operationId: api_settings_partial_update
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformSettings'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformSettings'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformSettings'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettings'
+          description: ''
+  /api/settings/rotate-secret/:
+    post:
+      operationId: api_settings_rotate_secret_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformSettings'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlatformSettings'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlatformSettings'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: Secret key rotation timestamp updated.
+  /api/tasks/:
+    get:
+      operationId: api_tasks_list
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+          description: ''
+    post:
+      operationId: api_tasks_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Task'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Task'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Task'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+          description: ''
+  /api/tasks/{id}/:
+    get:
+      operationId: api_tasks_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+          description: ''
+    put:
+      operationId: api_tasks_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Task'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Task'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Task'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+          description: ''
+    patch:
+      operationId: api_tasks_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTask'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTask'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTask'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+          description: ''
+    delete:
+      operationId: api_tasks_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/tasks/{id}/request-completion/:
+    post:
+      operationId: api_tasks_request_completion_create
+      description: |-
+        POST /api/tasks/<id>/request-completion/
+
+        Lets the assignee (staff) flag a task as ready for review, without
+        letting them change its status directly. Logs an ActivityLog entry and
+        broadcasts both the task update and the activity entry in real time so
+        admins see it immediately without refreshing.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Task'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Task'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Task'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+          description: ''
+  /api/users/:
+    get:
+      operationId: api_users_list
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+          description: ''
+components:
+  schemas:
+    ActivityLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        user_name:
+          type: string
+          readOnly: true
+        user_initials:
+          type: string
+          readOnly: true
+        action:
+          type: string
+          maxLength: 255
+        related_task:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        is_read:
+          type: string
+          readOnly: true
+      required:
+      - action
+      - created_at
+      - id
+      - is_read
+      - user
+      - user_initials
+      - user_name
+    Booking:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        client:
+          type: integer
+          readOnly: true
+        client_name:
+          type: string
+          readOnly: true
+        service_name:
+          type: string
+          maxLength: 255
+        scheduled_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/BookingStatusEnum'
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - client
+      - client_name
+      - created_at
+      - id
+      - scheduled_at
+      - service_name
+      - updated_at
+    BookingStatusEnum:
+      enum:
+      - pending
+      - confirmed
+      - cancelled
+      - completed
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `confirmed` - Confirmed
+        * `cancelled` - Cancelled
+        * `completed` - Completed
+    Document:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        uploaded_by:
+          type: integer
+          readOnly: true
+        uploaded_by_name:
+          type: string
+          readOnly: true
+        assigned_to:
+          type: integer
+          nullable: true
+        assigned_to_name:
+          type: string
+          readOnly: true
+        assigned_to_initials:
+          type: string
+          readOnly: true
+        title:
+          type: string
+          maxLength: 255
+        category:
+          type: string
+          maxLength: 100
+        file:
+          type: string
+          format: uri
+        file_size_mb:
+          type: number
+          format: double
+          readOnly: true
+          nullable: true
+        audit_notice:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assigned_to_initials
+      - assigned_to_name
+      - file
+      - file_size_mb
+      - id
+      - title
+      - updated_at
+      - uploaded_at
+      - uploaded_by
+      - uploaded_by_name
+    EnvironmentStageEnum:
+      enum:
+      - prod
+      - staging
+      - dev
+      type: string
+      description: |-
+        * `prod` - Production (Live Webhooks)
+        * `staging` - Staging Canary
+        * `dev` - Development Sandbox
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        client:
+          type: integer
+          readOnly: true
+        client_name:
+          type: string
+          readOnly: true
+        booking:
+          type: integer
+          nullable: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        status:
+          $ref: '#/components/schemas/InvoiceStatusEnum'
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - client
+      - client_name
+      - created_at
+      - id
+      - updated_at
+    InvoiceStatusEnum:
+      enum:
+      - draft
+      - sent
+      - paid
+      - overdue
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `sent` - Sent
+        * `paid` - Paid
+        * `overdue` - Overdue
+    PatchedBooking:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        client:
+          type: integer
+          readOnly: true
+        client_name:
+          type: string
+          readOnly: true
+        service_name:
+          type: string
+          maxLength: 255
+        scheduled_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/BookingStatusEnum'
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedDocument:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        uploaded_by:
+          type: integer
+          readOnly: true
+        uploaded_by_name:
+          type: string
+          readOnly: true
+        assigned_to:
+          type: integer
+          nullable: true
+        assigned_to_name:
+          type: string
+          readOnly: true
+        assigned_to_initials:
+          type: string
+          readOnly: true
+        title:
+          type: string
+          maxLength: 255
+        category:
+          type: string
+          maxLength: 100
+        file:
+          type: string
+          format: uri
+        file_size_mb:
+          type: number
+          format: double
+          readOnly: true
+          nullable: true
+        audit_notice:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedInvoice:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        client:
+          type: integer
+          readOnly: true
+        client_name:
+          type: string
+          readOnly: true
+        booking:
+          type: integer
+          nullable: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        status:
+          $ref: '#/components/schemas/InvoiceStatusEnum'
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedPlatformSettings:
+      type: object
+      properties:
+        workspace_title:
+          type: string
+          maxLength: 255
+        environment_stage:
+          $ref: '#/components/schemas/EnvironmentStageEnum'
+        fallback_api_url:
+          type: string
+          format: uri
+          maxLength: 200
+        email_alerts_enabled:
+          type: boolean
+        slack_webhooks_enabled:
+          type: boolean
+        mfa_enforced:
+          type: boolean
+        secret_key_rotated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        updated_by_name:
+          type: string
+          readOnly: true
+    PatchedTask:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 255
+        tag:
+          type: string
+          maxLength: 50
+        assignee:
+          type: integer
+          nullable: true
+        assignee_name:
+          type: string
+          readOnly: true
+        assignee_initials:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/TaskStatusEnum'
+        priority:
+          $ref: '#/components/schemas/PriorityEnum'
+        completion_requested:
+          type: boolean
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PlatformSettings:
+      type: object
+      properties:
+        workspace_title:
+          type: string
+          maxLength: 255
+        environment_stage:
+          $ref: '#/components/schemas/EnvironmentStageEnum'
+        fallback_api_url:
+          type: string
+          format: uri
+          maxLength: 200
+        email_alerts_enabled:
+          type: boolean
+        slack_webhooks_enabled:
+          type: boolean
+        mfa_enforced:
+          type: boolean
+        secret_key_rotated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        updated_by_name:
+          type: string
+          readOnly: true
+      required:
+      - secret_key_rotated_at
+      - updated_at
+      - updated_by
+      - updated_by_name
+    PriorityEnum:
+      enum:
+      - low
+      - medium
+      - high
+      - urgent
+      type: string
+      description: |-
+        * `low` - Low
+        * `medium` - Medium
+        * `high` - High
+        * `urgent` - Urgent
+    Register:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        full_name:
+          type: string
+          maxLength: 255
+        password:
+          type: string
+          writeOnly: true
+          minLength: 8
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+      required:
+      - email
+      - full_name
+      - password
+    RoleEnum:
+      enum:
+      - staff
+      - admin
+      type: string
+      description: |-
+        * `staff` - Staff Member
+        * `admin` - Administrator
+    Task:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 255
+        tag:
+          type: string
+          maxLength: 50
+        assignee:
+          type: integer
+          nullable: true
+        assignee_name:
+          type: string
+          readOnly: true
+        assignee_initials:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/TaskStatusEnum'
+        priority:
+          $ref: '#/components/schemas/PriorityEnum'
+        completion_requested:
+          type: boolean
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assignee_initials
+      - assignee_name
+      - created_at
+      - created_by
+      - id
+      - title
+      - updated_at
+    TaskStatusEnum:
+      enum:
+      - pending
+      - in_progress
+      - overdue
+      - complete
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `in_progress` - In Progress
+        * `overdue` - Overdue
+        * `complete` - Complete
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+      required:
+      - access
+      - refresh
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        full_name:
+          type: string
+          maxLength: 255
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+        is_active:
+          type: boolean
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - date_joined
+      - email
+      - full_name
+      - id
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

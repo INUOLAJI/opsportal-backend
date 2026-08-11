@@ -1,5 +1,7 @@
 from rest_framework import status, generics, permissions
 from django.contrib.auth import get_user_model, authenticate
+from django.utils import timezone
+from drf_spectacular.utils import extend_schema, OpenApiResponse
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -8,10 +10,10 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from .models import Task, ActivityLog, Booking, Document, Invoice
+from .models import Task, ActivityLog, Booking, Document, Invoice, PlatformSettings
 from .serializers import (
     RegisterSerializer, UserSerializer, TaskSerializer, ActivityLogSerializer,
-    BookingSerializer, DocumentSerializer, InvoiceSerializer
+    BookingSerializer, DocumentSerializer, InvoiceSerializer, PlatformSettingsSerializer
 )
 from .permissions import IsOwnerOrAdmin, IsAdminUser
 
@@ -61,6 +63,10 @@ class AuthAnonRateThrottle(AnonRateThrottle):
 # AUTH
 # ---------------------------------------------------------------------------
 
+@extend_schema(
+    request=RegisterSerializer,
+    responses={201: OpenApiResponse(description='Account created successfully'), 400: OpenApiResponse(description='Validation error')},
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([AuthAnonRateThrottle])
@@ -83,6 +89,10 @@ def register_user(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(
+    request=RegisterSerializer,
+    responses={200: OpenApiResponse(description='Authenticated successfully'), 400: OpenApiResponse(description='Bad request'), 401: OpenApiResponse(description='Invalid credentials')},
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([AuthAnonRateThrottle])
@@ -269,8 +279,10 @@ class ActivityMarkAllReadView(generics.GenericAPIView):
     as ActivityLogListView) as read by them, specifically. Doesn't affect
     other users' read state on the same shared entries.
     """
+    serializer_class = ActivityLogSerializer
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(responses={200: OpenApiResponse(description='All caught up.')})
     def post(self, request):
         user = request.user
         if _is_admin(user):
@@ -366,6 +378,52 @@ class InvoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
         if user.role == 'admin' or user.is_superuser:
             return Invoice.objects.all()
         return Invoice.objects.filter(client=user)
+
+
+# ---------------------------------------------------------------------------
+# PLATFORM SETTINGS
+# ---------------------------------------------------------------------------
+
+class PlatformSettingsView(generics.RetrieveUpdateAPIView):
+    serializer_class = PlatformSettingsSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        return PlatformSettings.load()
+
+    def update(self, request, *args, **kwargs):
+        if not _is_admin(request.user):
+            return Response(
+                {"detail": "Only administrators can update platform settings."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)
+
+
+class RotateSecretKeyView(generics.GenericAPIView):
+    serializer_class = PlatformSettingsSerializer
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(responses={200: OpenApiResponse(description='Secret key rotation timestamp updated.')})
+    def post(self, request):
+        if not _is_admin(request.user):
+            return Response(
+                {"detail": "Only administrators can rotate the secret key."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        settings_obj = PlatformSettings.load()
+        settings_obj.secret_key_rotated_at = timezone.now()
+        settings_obj.updated_by = request.user
+        settings_obj.save(update_fields=['secret_key_rotated_at', 'updated_by', 'updated_at'])
+
+        return Response(
+            {
+                "detail": "Secret key rotation timestamp updated.",
+                "secret_key_rotated_at": settings_obj.secret_key_rotated_at
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 # ---------------------------------------------------------------------------

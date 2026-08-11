@@ -1,4 +1,6 @@
 from django.urls import path
+from rest_framework_simplejwt.views import TokenRefreshView
+
 from .views import (
     register_user, signin_user, UserListView,
     TaskListCreateView, TaskDetailView, RequestTaskCompletionView,
@@ -6,11 +8,13 @@ from .views import (
     BookingListCreateView, BookingDetailView,
     DocumentListCreateView, DocumentDetailView,
     InvoiceListCreateView, InvoiceDetailView,
+    PlatformSettingsView, RotateSecretKeyView,
 )
 
 urlpatterns = [
     path('auth/signup/', register_user, name='register_user'),
     path('auth/signin/', signin_user, name='signin_user'),
+    path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('users/', UserListView.as_view(), name='user-list'),
 
     path('tasks/', TaskListCreateView.as_view(), name='task-list'),
@@ -28,4 +32,7 @@ urlpatterns = [
 
     path('invoices/', InvoiceListCreateView.as_view(), name='invoice-list'),
     path('invoices/<int:pk>/', InvoiceDetailView.as_view(), name='invoice-detail'),
+
+    path('settings/', PlatformSettingsView.as_view(), name='platform-settings'),
+    path('settings/rotate-secret/', RotateSecretKeyView.as_view(), name='rotate-secret'),
 ]
