@@ -17,10 +17,12 @@ DEBUG = os.environ.get('DEBUG', '0').lower() in ('true', '1', 't')
 
 DEFAULT_ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'opsportal-backend-n1jf.onrender.com']
 allowed_hosts_env = os.environ.get('ALLOWED_HOSTS', '').strip()
+ALLOWED_HOSTS = DEFAULT_ALLOWED_HOSTS.copy()
 if allowed_hosts_env:
-    ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.replace(',', ' ').split() if host.strip()]
-else:
-    ALLOWED_HOSTS = DEFAULT_ALLOWED_HOSTS
+    extra_hosts = [host.strip() for host in allowed_hosts_env.replace(',', ' ').split() if host.strip()]
+    for host in extra_hosts:
+        if host not in ALLOWED_HOSTS:
+            ALLOWED_HOSTS.append(host)
 
 AUTH_USER_MODEL = 'api.User'
 
