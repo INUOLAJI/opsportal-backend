@@ -15,7 +15,8 @@ if not SECRET_KEY:
 
 DEBUG = os.environ.get('DEBUG', '0').lower() in ('true', '1', 't')
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost 127.0.0.1').split(' ')
+ALLOWED_HOSTS_ENV = os.environ.get('ALLOWED_HOSTS', 'localhost 127.0.0.1 opsportal-backend-n1jf.onrender.com')
+ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_ENV.replace(',', ' ').split() if host.strip()]
 
 AUTH_USER_MODEL = 'api.User'
 
