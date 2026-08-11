@@ -196,3 +196,14 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_CREDENTIALS = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Frontend deployments
+CORS_ALLOWED_ORIGINS += [
+    "https://opsportal-ten.vercel.app",
+    "https://opsportal-backend-n1jf.onrender.com",
+]
+
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'authorization',
+]
