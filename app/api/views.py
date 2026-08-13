@@ -1,7 +1,9 @@
-from rest_framework import status, generics, permissions
+from rest_framework import status, generics, permissions, serializers
 from django.contrib.auth import get_user_model, authenticate
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema, OpenApiResponse
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
+from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -16,6 +18,7 @@ from .serializers import (
     BookingSerializer, DocumentSerializer, InvoiceSerializer, PlatformSettingsSerializer
 )
 from .permissions import IsOwnerOrAdmin, IsAdminUser
+from .tokens import email_verification_token, send_verification_email
 
 User = get_user_model()
 
@@ -116,6 +119,15 @@ def signin_user(request):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        if not user.is_verified and not user.is_superuser:
+            return Response(
+                {
+                    "detail": "Please verify your email address before signing in. Check your inbox for the verification link.",
+                    "code": "email_not_verified",
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         if user.role != role and not user.is_superuser:
             return Response(
                 {"detail": f"Access denied. Account is not registered as an {role}."},
@@ -142,6 +154,64 @@ def signin_user(request):
         {"detail": "Invalid email or password."},
         status=status.HTTP_401_UNAUTHORIZED
     )
+
+
+@extend_schema(
+    request=inline_serializer(
+        name='VerifyEmailRequest',
+        fields={'uid': serializers.CharField(), 'token': serializers.CharField()},
+    ),
+    responses={200: OpenApiResponse(description='Email verified'), 400: OpenApiResponse(description='Invalid or expired link')},
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
+def verify_email(request):
+    uid = request.data.get('uid')
+    token = request.data.get('token')
+
+    if not uid or not token:
+        return Response({"detail": "Missing verification link parameters."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user_pk = force_str(urlsafe_base64_decode(uid))
+        user = User.objects.get(pk=user_pk)
+    except (User.DoesNotExist, ValueError, TypeError, OverflowError):
+        return Response({"detail": "This verification link is invalid."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if user.is_verified:
+        return Response({"detail": "This account is already verified. You can sign in now."}, status=status.HTTP_200_OK)
+
+    if not email_verification_token.check_token(user, token):
+        return Response({"detail": "This verification link is invalid or has expired."}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.is_verified = True
+    user.save(update_fields=['is_verified'])
+    return Response({"detail": "Email verified successfully. You can sign in now."}, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    request=inline_serializer(name='ResendVerificationRequest', fields={'email': serializers.EmailField()}),
+    responses={200: OpenApiResponse(description='If an unverified account exists, an email was sent')},
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
+def resend_verification(request):
+    email = request.data.get('email')
+    generic_response = Response(
+        {"detail": "If an unverified account exists for that email, a new verification link has been sent."},
+        status=status.HTTP_200_OK
+    )
+    if not email:
+        return generic_response
+
+    # Same response either way so this endpoint can't be used to enumerate
+    # registered emails or verification status.
+    user = User.objects.filter(email__iexact=email).first()
+    if user and not user.is_verified:
+        send_verification_email(user)
+    return generic_response
 
 
 # ---------------------------------------------------------------------------

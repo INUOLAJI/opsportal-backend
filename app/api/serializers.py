@@ -1,6 +1,7 @@
 import os
 from rest_framework import serializers
 from .models import User, Task, ActivityLog, Booking, Document, Invoice, PlatformSettings
+from .tokens import send_verification_email
 
 # Max allowed upload size: 10MB
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
@@ -25,13 +26,23 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
+        # Staff accounts start unverified and get an email with a link to
+        # confirm; the account owner registering their company has no
+        # inviter to send a link from, so admins skip this (is_verified
+        # defaults True on the model).
+        role = validated_data.get('role', 'staff')
+        user = User.objects.create_user(**validated_data)
+        if role == 'staff':
+            user.is_verified = False
+            user.save(update_fields=['is_verified'])
+            send_verification_email(user)
+        return user
 
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'email', 'full_name', 'role', 'is_active', 'date_joined']
+        fields = ['id', 'email', 'full_name', 'role', 'is_active', 'is_verified', 'date_joined']
         read_only_fields = ['id', 'date_joined']
 
 

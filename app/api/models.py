@@ -35,6 +35,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='staff')
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
+    # Admins verify themselves implicitly by registering the company (no
+    # inviter to send a link from), so this defaults True and is only ever
+    # flipped False explicitly for staff accounts created via invite —
+    # see RegisterSerializer.create(). Staff can't sign in until they click
+    # the link emailed to them (see send_verification_email / verify_email).
+    is_verified = models.BooleanField(default=True)
     date_joined = models.DateTimeField(auto_now_add=True)
 
     objects = CustomUserManager()
