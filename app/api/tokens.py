@@ -28,16 +28,25 @@ def send_verification_email(user, request=None):
     frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173').rstrip('/')
     verify_link = f"{frontend_url}/verify-email?uid={uid}&token={token}"
 
-    send_mail(
-        subject="Verify your OpsPortal account",
-        message=(
-            f"Hi {user.full_name},\n\n"
-            f"An administrator created a staff account for you on OpsPortal.\n"
-            f"Verify your email to activate it and sign in:\n\n"
-            f"{verify_link}\n\n"
-            f"If you weren't expecting this, you can ignore this email."
-        ),
-        from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None),
-        recipient_list=[user.email],
-        fail_silently=False,
-    )
+    try:
+        send_mail(
+            subject="Verify your OpsPortal account",
+            message=(
+                f"Hi {user.full_name},\n\n"
+                f"An administrator created a staff account for you on OpsPortal.\n"
+                f"Verify your email to activate it and sign in:\n\n"
+                f"{verify_link}\n\n"
+                f"If you weren't expecting this, you can ignore this email."
+            ),
+            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None),
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+        user.verification_email_sent = True
+        return True
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to send verification email to {user.email}: {e}")
+        user.verification_email_sent = False
+        return False
