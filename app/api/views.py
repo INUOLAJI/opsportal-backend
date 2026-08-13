@@ -1,11 +1,13 @@
 from rest_framework import status, generics, permissions, serializers
 from django.contrib.auth import get_user_model, authenticate
+from django.db import models
 from django.utils import timezone
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -504,3 +506,31 @@ class UserListView(generics.ListAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
+
+
+class UserDetailView(generics.RetrieveDestroyAPIView):
+    """Admin-only. DELETE here is a soft delete — it deactivates the account
+    (is_active=False) rather than removing the row, because a hard delete
+    would CASCADE-wipe the person's ActivityLog trail and any Documents they
+    uploaded, which defeats the point of an audit log. Deactivation already
+    blocks both new sign-ins (checked in signin_user) and every already-
+    authenticated request (SimpleJWT's JWTAuthentication rejects inactive
+    users on every call), so access is revoked immediately either way."""
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [IsAdminUser]
+
+    def perform_destroy(self, instance):
+        if instance.pk == self.request.user.pk:
+            raise PermissionDenied("You can't remove your own account.")
+
+        if instance.role == 'admin' or instance.is_superuser:
+            other_active_admins = User.objects.filter(
+                models.Q(role='admin') | models.Q(is_superuser=True),
+                is_active=True,
+            ).exclude(pk=instance.pk)
+            if not other_active_admins.exists():
+                raise PermissionDenied("You can't remove the last active administrator.")
+
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
