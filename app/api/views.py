@@ -79,18 +79,22 @@ def register_user(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
-        return Response(
-            {
-                "message": "Account created successfully.",
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "full_name": user.full_name,
-                    "role": user.role,
-                }
-            },
-            status=status.HTTP_201_CREATED
-        )
+        response_data = {
+            "message": "Account created successfully.",
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "role": user.role,
+            }
+        }
+        # False specifically means "account created, but the verification
+        # email failed to send" — check the Render logs / EMAIL_HOST config.
+        email_sent = getattr(user, 'verification_email_sent', None)
+        if email_sent is False:
+            response_data["message"] = "Account created, but the verification email could not be sent. Check email settings and use Resend."
+            response_data["verification_email_sent"] = False
+        return Response(response_data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
