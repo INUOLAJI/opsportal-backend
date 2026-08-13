@@ -509,13 +509,16 @@ class UserListView(generics.ListAPIView):
 
 
 class UserDetailView(generics.RetrieveDestroyAPIView):
-    """Admin-only. DELETE here is a soft delete — it deactivates the account
-    (is_active=False) rather than removing the row, because a hard delete
-    would CASCADE-wipe the person's ActivityLog trail and any Documents they
-    uploaded, which defeats the point of an audit log. Deactivation already
-    blocks both new sign-ins (checked in signin_user) and every already-
-    authenticated request (SimpleJWT's JWTAuthentication rejects inactive
-    users on every call), so access is revoked immediately either way."""
+    """Admin-only. DELETE permanently removes the account and, via CASCADE
+    on the FKs below, everything tied to it:
+      - ActivityLog entries where they're the actor (ActivityLog.user)
+      - Documents they uploaded (Document.uploaded_by) — including the
+        underlying Cloudinary file's DB record, though note Cloudinary
+        itself isn't cleaned up here (see NOTE below); this mirrors the
+        existing gap in DocumentDetailView, not something new
+    Tasks/Bookings/Invoices/Documents assigned-but-not-owned by them use
+    SET_NULL, so those records survive with the link cleared rather than
+    disappearing. This is irreversible — there's no undo."""
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAdminUser]
@@ -532,5 +535,11 @@ class UserDetailView(generics.RetrieveDestroyAPIView):
             if not other_active_admins.exists():
                 raise PermissionDenied("You can't remove the last active administrator.")
 
-        instance.is_active = False
-        instance.save(update_fields=['is_active'])
+        # NOTE: this deletes the Document *rows* (via CASCADE) but does not
+        # call Cloudinary's API to remove the underlying file blobs, so
+        # deleted staff's uploads become orphaned/unreferenced in Cloudinary
+        # storage rather than actually freed. Fixing that requires wiring a
+        # pre_delete signal (or overriding this method) to call
+        # cloudinary.uploader.destroy() per file first — out of scope here
+        # since DocumentDetailView's own delete has the same gap already.
+        instance.delete()
