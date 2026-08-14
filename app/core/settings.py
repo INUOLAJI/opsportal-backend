@@ -219,12 +219,22 @@ EMAIL_BACKEND = os.environ.get(
     'EMAIL_BACKEND',
     'django.core.mail.backends.smtp.EmailBackend' if os.environ.get('EMAIL_HOST') else 'django.core.mail.backends.console.EmailBackend'
 )
-EMAIL_HOST = os.environ.get('EMAIL_HOST', '')
-EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 465))
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
-EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '1').lower() in ('true', '1', 't')
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'OpsPortal <no-reply@opsportal.app>')
+
+# If port 465 or EMAIL_USE_SSL is set, use SSL; otherwise check EMAIL_USE_TLS
+_use_ssl_env = os.environ.get('EMAIL_USE_SSL')
+if _use_ssl_env is not None:
+    EMAIL_USE_SSL = _use_ssl_env.lower() in ('true', '1', 't')
+else:
+    EMAIL_USE_SSL = (EMAIL_PORT == 465)
+
+EMAIL_USE_TLS = False if EMAIL_USE_SSL else (os.environ.get('EMAIL_USE_TLS', '0').lower() in ('true', '1', 't'))
+EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', 15))
+
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', f'OpsPortal <{EMAIL_HOST_USER}>' if EMAIL_HOST_USER else 'OpsPortal <no-reply@opsportal.app>')
 
 # Used to build the verification link staff click from their inbox.
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://opsportal-ten.vercel.app')

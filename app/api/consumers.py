@@ -20,7 +20,8 @@ class DashboardConsumer(AsyncJsonWebsocketConsumer):
 
         self.user = user
         is_admin = bool(user.role == 'admin' or user.is_superuser)
-        self.group_name = 'admin_dashboard' if is_admin else f'staff_{user.id}_dashboard'
+        company_id = user.company_id or 0
+        self.group_name = f'company_{company_id}_admin_dashboard' if is_admin else f'company_{company_id}_staff_{user.id}_dashboard'
 
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()

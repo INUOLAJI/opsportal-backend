@@ -5,15 +5,32 @@ from cloudinary_storage.storage import RawMediaCloudinaryStorage
 
 
 # ---------------------------------------------------------------------------
+# COMPANY (Multi-Tenancy Tenant Isolation)
+# ---------------------------------------------------------------------------
+
+class Company(models.Model):
+    name = models.CharField(max_length=255)
+    phone = models.CharField(max_length=50, blank=True)
+    address = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name_plural = 'Companies'
+
+    def __str__(self):
+        return self.name
+
+
+# ---------------------------------------------------------------------------
 # USER
 # ---------------------------------------------------------------------------
 
 class CustomUserManager(BaseUserManager):
-    def create_user(self, email, full_name, password=None, role='staff', **extra_fields):
+    def create_user(self, email, full_name, password=None, role='staff', company=None, **extra_fields):
         if not email:
             raise ValueError('Users must have an email address.')
         email = self.normalize_email(email)
-        user = self.model(email=email, full_name=full_name, role=role, **extra_fields)
+        user = self.model(email=email, full_name=full_name, role=role, company=company, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -33,6 +50,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
     full_name = models.CharField(max_length=255)
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='staff')
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, null=True, blank=True, related_name='users'
+    )
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     # Admins verify themselves implicitly by registering the company (no
@@ -48,8 +68,18 @@ class User(AbstractBaseUser, PermissionsMixin):
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['full_name']
 
+    def get_or_create_company(self, company_name=None):
+        if self.company:
+            return self.company
+        name = company_name or f"{self.full_name}'s Enterprise"
+        comp = Company.objects.create(name=name)
+        self.company = comp
+        self.save(update_fields=['company'])
+        return comp
+
     def __str__(self):
-        return f"{self.full_name} ({self.email}) - {self.role}"
+        comp_name = self.company.name if self.company else 'No Company'
+        return f"{self.full_name} ({self.email}) - {self.role} [{comp_name}]"
 
     @property
     def initials(self):
@@ -76,6 +106,9 @@ class Task(models.Model):
         ('urgent', 'Urgent'),
     )
 
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, null=True, blank=True, related_name='tasks'
+    )
     title = models.CharField(max_length=255)
     tag = models.CharField(max_length=50, blank=True)  # e.g. Backend, Security, UI/UX
     assignee = models.ForeignKey(
@@ -107,6 +140,9 @@ class Task(models.Model):
 # ---------------------------------------------------------------------------
 
 class ActivityLog(models.Model):
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, null=True, blank=True, related_name='activities'
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='activities'
     )
@@ -141,6 +177,9 @@ class Booking(models.Model):
         ('completed', 'Completed'),
     )
 
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, null=True, blank=True, related_name='bookings'
+    )
     client = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='bookings'
     )
@@ -163,6 +202,9 @@ class Booking(models.Model):
 # ---------------------------------------------------------------------------
 
 class Document(models.Model):
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, null=True, blank=True, related_name='documents'
+    )
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='documents'
     )
@@ -207,6 +249,9 @@ class Invoice(models.Model):
         ('overdue', 'Overdue'),
     )
 
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, null=True, blank=True, related_name='invoices'
+    )
     client = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='invoices'
     )
@@ -227,7 +272,7 @@ class Invoice(models.Model):
 
 
 # ---------------------------------------------------------------------------
-# PLATFORM SETTINGS  (single row — global ops config, admin-editable)
+# PLATFORM SETTINGS  (per company ops config, admin-editable)
 # ---------------------------------------------------------------------------
 
 class PlatformSettings(models.Model):
@@ -237,6 +282,9 @@ class PlatformSettings(models.Model):
         ('dev', 'Development Sandbox'),
     )
 
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, null=True, blank=True, related_name='settings'
+    )
     workspace_title = models.CharField(max_length=255, default='OpsPortal Enterprise')
     environment_stage = models.CharField(max_length=20, choices=ENV_CHOICES, default='prod')
     fallback_api_url = models.URLField(blank=True, default='')
@@ -259,16 +307,18 @@ class PlatformSettings(models.Model):
         verbose_name_plural = 'Platform Settings'
 
     def __str__(self):
-        return 'Platform Settings'
+        comp_name = self.company.name if self.company else 'Global'
+        return f'Platform Settings ({comp_name})'
 
-    # Enforced as a true singleton: always load/update row pk=1, creating it
-    # with defaults on first access rather than requiring a fixture or a
-    # manual admin step before the Settings page can load.
     @classmethod
-    def load(cls):
+    def load(cls, company=None):
+        if company:
+            obj, _ = cls.objects.get_or_create(company=company)
+            return obj
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
 
     def save(self, *args, **kwargs):
-        self.pk = 1
-        super().save(*args, **kwargs)
+        if not self.company and not self.pk:
+            self.pk = 1
+        super().save(*args, **kwargs)

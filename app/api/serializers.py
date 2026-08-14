@@ -10,10 +10,13 @@ ALLOWED_DOCUMENT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.png', '.jpg', '.jpeg',
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
+    company_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    company_phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    company_address = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ['email', 'full_name', 'password', 'role']
+        fields = ['email', 'full_name', 'password', 'role', 'company_name', 'company_phone', 'company_address']
 
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
@@ -26,12 +29,33 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        # Staff accounts start unverified and get an email with a link to
-        # confirm; the account owner registering their company has no
-        # inviter to send a link from, so admins skip this (is_verified
-        # defaults True on the model).
+        company_name = validated_data.pop('company_name', None)
+        company_phone = validated_data.pop('company_phone', '')
+        company_address = validated_data.pop('company_address', '')
         role = validated_data.get('role', 'staff')
-        user = User.objects.create_user(**validated_data)
+
+        request = self.context.get('request')
+        company = None
+
+        if request and request.user and request.user.is_authenticated:
+            # If created by an authenticated user (e.g. Admin creating Staff), assign to Admin's exact company
+            company = request.user.get_or_create_company()
+        elif role == 'admin':
+            # Admin registering a new company -> create a fresh, dedicated Company instance
+            c_name = company_name.strip() if company_name else f"{validated_data.get('full_name')}'s Enterprise"
+            from .models import Company
+            company = Company.objects.create(
+                name=c_name,
+                phone=company_phone,
+                address=company_address
+            )
+        else:
+            from .models import Company
+            c_name = company_name.strip() if company_name else f"{validated_data.get('full_name')}'s Workspace"
+            company = Company.objects.create(name=c_name)
+
+        user = User.objects.create_user(company=company, **validated_data)
+
         if role == 'staff':
             user.is_verified = False
             user.save(update_fields=['is_verified'])
@@ -40,10 +64,13 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    company_id = serializers.IntegerField(source='company.id', read_only=True)
+
     class Meta:
         model = User
-        fields = ['id', 'email', 'full_name', 'role', 'is_active', 'is_verified', 'date_joined']
-        read_only_fields = ['id', 'date_joined']
+        fields = ['id', 'email', 'full_name', 'role', 'company', 'company_id', 'company_name', 'is_active', 'is_verified', 'date_joined']
+        read_only_fields = ['id', 'company', 'company_id', 'company_name', 'date_joined']
 
 
 class TaskSerializer(serializers.ModelSerializer):
@@ -57,6 +84,15 @@ class TaskSerializer(serializers.ModelSerializer):
             'status', 'priority', 'completion_requested', 'due_date', 'created_by', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
+
+    def validate_assignee(self, value):
+        if value:
+            request = self.context.get('request')
+            if request and request.user and request.user.is_authenticated:
+                user_company = request.user.company or request.user.get_or_create_company()
+                if value.company_id != user_company.id:
+                    raise serializers.ValidationError("Assignee must belong to your company.")
+        return value
 
 
 class ActivityLogSerializer(serializers.ModelSerializer):
@@ -105,6 +141,15 @@ class DocumentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['uploaded_by', 'file_size_mb', 'uploaded_at', 'updated_at']
 
+    def validate_assigned_to(self, value):
+        if value:
+            request = self.context.get('request')
+            if request and request.user and request.user.is_authenticated:
+                user_company = request.user.company or request.user.get_or_create_company()
+                if value.company_id != user_company.id:
+                    raise serializers.ValidationError("Assigned member must belong to your company.")
+        return value
+
     def validate_file(self, value):
         if value.size > MAX_UPLOAD_SIZE_BYTES:
             raise serializers.ValidationError("File size exceeds maximum allowable limit of 10MB.")
@@ -130,12 +175,81 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
 class PlatformSettingsSerializer(serializers.ModelSerializer):
     updated_by_name = serializers.CharField(source='updated_by.full_name', read_only=True)
+    company_name = serializers.SerializerMethodField()
+    company_phone = serializers.SerializerMethodField()
+    company_address = serializers.SerializerMethodField()
+    admin_name = serializers.SerializerMethodField()
+    admin_email = serializers.SerializerMethodField()
+    admin_role = serializers.SerializerMethodField()
 
     class Meta:
         model = PlatformSettings
         fields = [
             'workspace_title', 'environment_stage', 'fallback_api_url',
             'email_alerts_enabled', 'slack_webhooks_enabled', 'mfa_enforced',
+            'company_name', 'company_phone', 'company_address',
+            'admin_name', 'admin_email', 'admin_role',
             'secret_key_rotated_at', 'updated_at', 'updated_by', 'updated_by_name',
         ]
-        read_only_fields = ['secret_key_rotated_at', 'updated_at', 'updated_by']
+        read_only_fields = ['secret_key_rotated_at', 'updated_at', 'updated_by', 'admin_name', 'admin_email', 'admin_role']
+
+    def get_company_name(self, obj):
+        if obj.company and obj.company.name:
+            return obj.company.name
+        request = self.context.get('request')
+        if request and request.user and request.user.company and request.user.company.name:
+            return request.user.company.name
+        return ''
+
+    def get_company_phone(self, obj):
+        if obj.company and obj.company.phone:
+            return obj.company.phone
+        request = self.context.get('request')
+        if request and request.user and request.user.company and request.user.company.phone:
+            return request.user.company.phone
+        return ''
+
+    def get_company_address(self, obj):
+        if obj.company and obj.company.address:
+            return obj.company.address
+        request = self.context.get('request')
+        if request and request.user and request.user.company and request.user.company.address:
+            return request.user.company.address
+        return ''
+
+    def get_admin_name(self, obj):
+        request = self.context.get('request')
+        return request.user.full_name if request and request.user and request.user.is_authenticated else ''
+
+    def get_admin_email(self, obj):
+        request = self.context.get('request')
+        return request.user.email if request and request.user and request.user.is_authenticated else ''
+
+    def get_admin_role(self, obj):
+        request = self.context.get('request')
+        return request.user.role if request and request.user and request.user.is_authenticated else ''
+
+    def update(self, instance, validated_data):
+        company_name = self.initial_data.get('company_name')
+        company_phone = self.initial_data.get('company_phone')
+        company_address = self.initial_data.get('company_address')
+
+        instance = super().update(instance, validated_data)
+
+        request = self.context.get('request')
+        company = instance.company or (request.user.get_or_create_company() if request and request.user else None)
+
+        if company:
+            if company_name is not None and str(company_name).strip():
+                company.name = str(company_name).strip()
+            if company_phone is not None:
+                company.phone = str(company_phone).strip()
+            if company_address is not None:
+                company.address = str(company_address).strip()
+            company.save()
+
+            if not instance.company:
+                instance.company = company
+                instance.save(update_fields=['company'])
+
+        return instance

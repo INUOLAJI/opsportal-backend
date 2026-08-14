@@ -46,18 +46,21 @@ def _broadcast(group_name, event_type, payload_key, data):
 
 
 def _broadcast_task(event_type, task):
-    """Notify admins (always) and the assignee's personal group (if the
-    assignee isn't an admin, since admins already get the admin broadcast)."""
+    """Notify admins of the same company (always) and the assignee's personal group."""
     data = TaskSerializer(task).data
-    _broadcast('admin_dashboard', event_type, 'task', data)
-    if task.assignee_id and not _is_admin(task.assignee):
-        _broadcast(_staff_group(task.assignee_id), event_type, 'task', data)
+    company_id = task.company_id or (task.created_by.company_id if task.created_by else None)
+    if company_id:
+        _broadcast(f'company_{company_id}_admin_dashboard', event_type, 'task', data)
+        if task.assignee_id and not _is_admin(task.assignee):
+            _broadcast(f'company_{company_id}_staff_{task.assignee_id}_dashboard', event_type, 'task', data)
 
 
 def _broadcast_activity(activity):
     data = ActivityLogSerializer(activity).data
-    _broadcast('admin_dashboard', 'activity.created', 'activity', data)
-    _broadcast(_staff_group(activity.user_id), 'activity.created', 'activity', data)
+    company_id = activity.company_id or activity.user.company_id
+    if company_id:
+        _broadcast(f'company_{company_id}_admin_dashboard', 'activity.created', 'activity', data)
+        _broadcast(f'company_{company_id}_staff_{activity.user_id}_dashboard', 'activity.created', 'activity', data)
 
 
 class AuthAnonRateThrottle(AnonRateThrottle):
@@ -76,9 +79,10 @@ class AuthAnonRateThrottle(AnonRateThrottle):
 @permission_classes([AllowAny])
 @throttle_classes([AuthAnonRateThrottle])
 def register_user(request):
-    serializer = RegisterSerializer(data=request.data)
+    serializer = RegisterSerializer(data=request.data, context={'request': request})
     if serializer.is_valid():
         user = serializer.save()
+        company = user.company or user.get_or_create_company()
         response_data = {
             "message": "Account created successfully.",
             "user": {
@@ -86,6 +90,9 @@ def register_user(request):
                 "email": user.email,
                 "full_name": user.full_name,
                 "role": user.role,
+                "company_id": company.id if company else None,
+                "company": company.id if company else None,
+                "company_name": company.name if company else None,
             }
         }
         # False specifically means "account created, but the verification
@@ -141,6 +148,7 @@ def signin_user(request):
             )
 
         refresh = RefreshToken.for_user(user)
+        company = user.company or user.get_or_create_company()
 
         return Response({
             "message": "Authenticated successfully",
@@ -153,6 +161,11 @@ def signin_user(request):
                 "email": user.email,
                 "full_name": user.full_name,
                 "role": user.role,
+                "company_id": company.id if company else None,
+                "company": company.id if company else None,
+                "company_name": company.name if company else None,
+                "company_phone": company.phone if company else '',
+                "company_address": company.address if company else '',
             }
         }, status=status.HTTP_200_OK)
 
@@ -230,11 +243,11 @@ class TaskListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         user = self.request.user
+        company = user.get_or_create_company()
         if _is_admin(user):
-            return Task.objects.all()
-        # Staff only ever see tasks assigned to them — not tasks they created,
-        # since staff can no longer create tasks at all.
-        return Task.objects.filter(assignee=user)
+            return Task.objects.filter(company=company)
+        # Staff only ever see tasks assigned to them in their own company
+        return Task.objects.filter(company=company, assignee=user)
 
     def create(self, request, *args, **kwargs):
         if not _is_admin(request.user):
@@ -245,7 +258,8 @@ class TaskListCreateView(generics.ListCreateAPIView):
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        task = serializer.save(created_by=self.request.user)
+        company = self.request.user.get_or_create_company()
+        task = serializer.save(created_by=self.request.user, company=company)
         _broadcast_task('task.created', task)
 
 
@@ -255,9 +269,10 @@ class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         user = self.request.user
+        company = user.get_or_create_company()
         if _is_admin(user):
-            return Task.objects.all()
-        return Task.objects.filter(assignee=user)
+            return Task.objects.filter(company=company)
+        return Task.objects.filter(company=company, assignee=user)
 
     def update(self, request, *args, **kwargs):
         # Staff can view their assigned task detail, but only an admin can change
@@ -300,8 +315,10 @@ class RequestTaskCompletionView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        user = request.user
+        company = user.company or user.get_or_create_company()
         try:
-            task = Task.objects.get(pk=pk)
+            task = Task.objects.get(pk=pk, company=company)
         except Task.DoesNotExist:
             return Response({"detail": "Task not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -322,6 +339,7 @@ class RequestTaskCompletionView(generics.GenericAPIView):
         _broadcast_task('task.updated', task)
 
         activity = ActivityLog.objects.create(
+            company=company,
             user=request.user,
             action=f'requested a completion review for "{task.title}"',
             related_task=task
@@ -342,9 +360,10 @@ class ActivityLogListView(generics.ListAPIView):
 
     def get_queryset(self):
         user = self.request.user
+        company = user.get_or_create_company()
         if _is_admin(user):
-            return ActivityLog.objects.all()[:20]
-        return ActivityLog.objects.filter(user=user)[:20]
+            return ActivityLog.objects.filter(company=company)[:20]
+        return ActivityLog.objects.filter(company=company, user=user)[:20]
 
 
 class ActivityMarkAllReadView(generics.GenericAPIView):
@@ -361,10 +380,11 @@ class ActivityMarkAllReadView(generics.GenericAPIView):
     @extend_schema(responses={200: OpenApiResponse(description='All caught up.')})
     def post(self, request):
         user = request.user
+        company = user.get_or_create_company()
         if _is_admin(user):
-            queryset = ActivityLog.objects.all()[:20]
+            queryset = ActivityLog.objects.filter(company=company)[:20]
         else:
-            queryset = ActivityLog.objects.filter(user=user)[:20]
+            queryset = ActivityLog.objects.filter(company=company, user=user)[:20]
 
         for activity in queryset:
             activity.read_by.add(user)
@@ -382,12 +402,14 @@ class BookingListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin' or user.is_superuser:
-            return Booking.objects.all()
-        return Booking.objects.filter(client=user)
+        company = user.get_or_create_company()
+        if _is_admin(user):
+            return Booking.objects.filter(company=company)
+        return Booking.objects.filter(company=company, client=user)
 
     def perform_create(self, serializer):
-        serializer.save(client=self.request.user)
+        company = self.request.user.get_or_create_company()
+        serializer.save(client=self.request.user, company=company)
 
 
 class BookingDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -396,9 +418,10 @@ class BookingDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin' or user.is_superuser:
-            return Booking.objects.all()
-        return Booking.objects.filter(client=user)
+        company = user.get_or_create_company()
+        if _is_admin(user):
+            return Booking.objects.filter(company=company)
+        return Booking.objects.filter(company=company, client=user)
 
 
 # ---------------------------------------------------------------------------
@@ -411,12 +434,16 @@ class DocumentListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin' or user.is_superuser:
-            return Document.objects.all()
-        return Document.objects.filter(uploaded_by=user) | Document.objects.filter(assigned_to=user)
+        company = user.get_or_create_company()
+        if _is_admin(user):
+            return Document.objects.filter(company=company)
+        return Document.objects.filter(company=company).filter(
+            models.Q(uploaded_by=user) | models.Q(assigned_to=user)
+        )
 
     def perform_create(self, serializer):
-        serializer.save(uploaded_by=self.request.user)
+        company = self.request.user.get_or_create_company()
+        serializer.save(uploaded_by=self.request.user, company=company)
 
 
 class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -425,9 +452,12 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin' or user.is_superuser:
-            return Document.objects.all()
-        return Document.objects.filter(uploaded_by=user) | Document.objects.filter(assigned_to=user) | Document.objects.filter(assigned_to=user)
+        company = user.get_or_create_company()
+        if _is_admin(user):
+            return Document.objects.filter(company=company)
+        return Document.objects.filter(company=company).filter(
+            models.Q(uploaded_by=user) | models.Q(assigned_to=user)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -440,9 +470,14 @@ class InvoiceListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin' or user.is_superuser:
-            return Invoice.objects.all()
-        return Invoice.objects.filter(client=user)
+        company = user.get_or_create_company()
+        if _is_admin(user):
+            return Invoice.objects.filter(company=company)
+        return Invoice.objects.filter(company=company, client=user)
+
+    def perform_create(self, serializer):
+        company = self.request.user.get_or_create_company()
+        serializer.save(company=company)
 
 
 class InvoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -451,9 +486,10 @@ class InvoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin' or user.is_superuser:
-            return Invoice.objects.all()
-        return Invoice.objects.filter(client=user)
+        company = user.get_or_create_company()
+        if _is_admin(user):
+            return Invoice.objects.filter(company=company)
+        return Invoice.objects.filter(company=company, client=user)
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +501,8 @@ class PlatformSettingsView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
-        return PlatformSettings.load()
+        company = self.request.user.get_or_create_company()
+        return PlatformSettings.load(company=company)
 
     def update(self, request, *args, **kwargs):
         if not _is_admin(request.user):
@@ -488,7 +525,8 @@ class RotateSecretKeyView(generics.GenericAPIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        settings_obj = PlatformSettings.load()
+        company = request.user.get_or_create_company()
+        settings_obj = PlatformSettings.load(company=company)
         settings_obj.secret_key_rotated_at = timezone.now()
         settings_obj.updated_by = request.user
         settings_obj.save(update_fields=['secret_key_rotated_at', 'updated_by', 'updated_at'])
@@ -507,43 +545,41 @@ class RotateSecretKeyView(generics.GenericAPIView):
 # ---------------------------------------------------------------------------
 
 class UserListView(generics.ListAPIView):
-    queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        user = self.request.user
+        company = user.company or user.get_or_create_company()
+        # Strictly return users belonging to the request user's company
+        return User.objects.filter(company=company)
+
 
 class UserDetailView(generics.RetrieveDestroyAPIView):
-    """Admin-only. DELETE permanently removes the account and, via CASCADE
-    on the FKs below, everything tied to it:
-      - ActivityLog entries where they're the actor (ActivityLog.user)
-      - Documents they uploaded (Document.uploaded_by) — including the
-        underlying Cloudinary file's DB record, though note Cloudinary
-        itself isn't cleaned up here (see NOTE below); this mirrors the
-        existing gap in DocumentDetailView, not something new
-    Tasks/Bookings/Invoices/Documents assigned-but-not-owned by them use
-    SET_NULL, so those records survive with the link cleared rather than
-    disappearing. This is irreversible — there's no undo."""
-    queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAdminUser]
 
+    def get_queryset(self):
+        user = self.request.user
+        company = user.company or user.get_or_create_company()
+        return User.objects.filter(company=company)
+
     def perform_destroy(self, instance):
+        user = self.request.user
+        company = user.company or user.get_or_create_company()
+        if instance.company_id != company.id:
+            raise PermissionDenied("You can only remove members belonging to your company.")
+
         if instance.pk == self.request.user.pk:
             raise PermissionDenied("You can't remove your own account.")
 
         if instance.role == 'admin' or instance.is_superuser:
             other_active_admins = User.objects.filter(
                 models.Q(role='admin') | models.Q(is_superuser=True),
+                company=instance.company,
                 is_active=True,
             ).exclude(pk=instance.pk)
             if not other_active_admins.exists():
-                raise PermissionDenied("You can't remove the last active administrator.")
+                raise PermissionDenied("You can't remove the last active administrator of this company.")
 
-        # NOTE: this deletes the Document *rows* (via CASCADE) but does not
-        # call Cloudinary's API to remove the underlying file blobs, so
-        # deleted staff's uploads become orphaned/unreferenced in Cloudinary
-        # storage rather than actually freed. Fixing that requires wiring a
-        # pre_delete signal (or overriding this method) to call
-        # cloudinary.uploader.destroy() per file first — out of scope here
-        # since DocumentDetailView's own delete has the same gap already.
         instance.delete()
