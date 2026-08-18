@@ -211,30 +211,17 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
 # ---------------------------------------------------------------------------
 # EMAIL (staff verification links)
 # ---------------------------------------------------------------------------
-# Defaults to printing emails to the console so verification works locally
-# with zero setup. Set EMAIL_HOST/EMAIL_HOST_USER/EMAIL_HOST_PASSWORD (e.g.
-# via a transactional provider's SMTP creds) in the environment to send real
-# email in production.
-EMAIL_BACKEND = os.environ.get(
-    'EMAIL_BACKEND',
-    'django.core.mail.backends.smtp.EmailBackend' if os.environ.get('EMAIL_HOST') else 'django.core.mail.backends.console.EmailBackend'
-)
-EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
-EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 465))
-EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
-EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
-
-# If port 465 or EMAIL_USE_SSL is set, use SSL; otherwise check EMAIL_USE_TLS
-_use_ssl_env = os.environ.get('EMAIL_USE_SSL')
-if _use_ssl_env is not None:
-    EMAIL_USE_SSL = _use_ssl_env.lower() in ('true', '1', 't')
-else:
-    EMAIL_USE_SSL = (EMAIL_PORT == 465)
-
-EMAIL_USE_TLS = False if EMAIL_USE_SSL else (os.environ.get('EMAIL_USE_TLS', '0').lower() in ('true', '1', 't'))
-EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', 15))
-
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', f'OpsPortal <{EMAIL_HOST_USER}>' if EMAIL_HOST_USER else 'OpsPortal <no-reply@opsportal.app>')
+# Django still generates the uid/token and owns verification itself (see
+# verify_email in views.py) — actual delivery is delegated to a Supabase
+# Edge Function ("send-verification-email"), which sends the email via
+# Resend. Set these two in the environment (Render):
+#   SUPABASE_EDGE_FUNCTIONS_URL   e.g. https://<project-ref>.functions.supabase.co
+#   SUPABASE_EDGE_FUNCTION_SECRET  must match EDGE_FUNCTION_SECRET set on the
+#                                   Supabase function itself
+# Without these set, send_verification_email() logs an error and returns
+# False instead of sending (see tokens.py).
+SUPABASE_EDGE_FUNCTIONS_URL = os.environ.get('SUPABASE_EDGE_FUNCTIONS_URL', '')
+SUPABASE_EDGE_FUNCTION_SECRET = os.environ.get('SUPABASE_EDGE_FUNCTION_SECRET', '')
 
 # Used to build the verification link staff click from their inbox.
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://opsportal-ten.vercel.app')
