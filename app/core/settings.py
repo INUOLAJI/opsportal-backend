@@ -211,17 +211,24 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
 # ---------------------------------------------------------------------------
 # EMAIL (staff verification links)
 # ---------------------------------------------------------------------------
-# Django still generates the uid/token and owns verification itself (see
-# verify_email in views.py) — actual delivery is delegated to a Supabase
-# Edge Function ("send-verification-email"), which sends the email via
-# Resend. Set these two in the environment (Render):
-#   SUPABASE_EDGE_FUNCTIONS_URL   e.g. https://<project-ref>.functions.supabase.co
-#   SUPABASE_EDGE_FUNCTION_SECRET  must match EDGE_FUNCTION_SECRET set on the
-#                                   Supabase function itself
+# Django generates the uid/token and owns verification itself (see
+# verify_email in views.py) and now also sends the email directly via
+# Gmail SMTP using django.core.mail — no third-party domain verification
+# needed. Set these in the environment (Render):
+#   EMAIL_HOST_USER       the Gmail address sending the emails
+#   EMAIL_HOST_PASSWORD   a 16-character Gmail "App Password" (NOT your
+#                          normal Gmail password — generate one at
+#                          https://myaccount.google.com/apppasswords,
+#                          requires 2-Step Verification enabled on the account)
 # Without these set, send_verification_email() logs an error and returns
 # False instead of sending (see tokens.py).
-SUPABASE_EDGE_FUNCTIONS_URL = os.environ.get('SUPABASE_EDGE_FUNCTIONS_URL', '')
-SUPABASE_EDGE_FUNCTION_SECRET = os.environ.get('SUPABASE_EDGE_FUNCTION_SECRET', '')
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
 
 # Used to build the verification link staff click from their inbox.
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://opsportal-ten.vercel.app')
