@@ -141,11 +141,14 @@ def signin_user(request):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        if user.role != role and not user.is_superuser:
-            return Response(
-                {"detail": f"Access denied. Account is not registered as an {role}."},
-                status=status.HTTP_403_FORBIDDEN
-            )
+        # NOTE: previously required the requested `role` to match
+        # user.role, rejecting everyone else with "Account is not
+        # registered as an {role}." OpsPortal has a single shared sign-in
+        # page for both admins and staff (see SignInPage.jsx) which always
+        # sent role='admin', so this silently locked every staff account
+        # out even after email verification. Role is looked up from the
+        # authenticated user below and returned to the frontend — it's not
+        # something the client should be asserting at login time.
 
         refresh = RefreshToken.for_user(user)
         company = user.company or user.get_or_create_company()
