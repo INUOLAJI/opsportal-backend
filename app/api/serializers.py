@@ -1,6 +1,6 @@
 import os
 from rest_framework import serializers
-from .models import User, Task, ActivityLog, Booking, Document, Invoice, PlatformSettings
+from .models import User, Task, TaskAttachment, ActivityLog, Booking, Document, Invoice, PlatformSettings
 from .tokens import send_verification_email
 
 # Max allowed upload size: 10MB
@@ -75,17 +75,46 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'company', 'company_id', 'company_name', 'date_joined']
 
 
+class TaskAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True)
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TaskAttachment
+        fields = ['id', 'filename', 'file_url', 'file_size_mb', 'uploaded_by', 'uploaded_by_name', 'uploaded_at']
+        read_only_fields = ['id', 'filename', 'file_url', 'file_size_mb', 'uploaded_by', 'uploaded_by_name', 'uploaded_at']
+
+    def get_file_url(self, obj):
+        try:
+            return obj.file.url
+        except Exception:
+            return None
+
+
 class TaskSerializer(serializers.ModelSerializer):
     assignee_name = serializers.CharField(source='assignee.full_name', read_only=True)
     assignee_initials = serializers.CharField(source='assignee.initials', read_only=True)
+    assignees = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=User.objects.all(), required=False
+    )
+    assignees_detail = serializers.SerializerMethodField(read_only=True)
+    attachments = TaskAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Task
         fields = [
             'id', 'title', 'tag', 'assignee', 'assignee_name', 'assignee_initials',
-            'status', 'priority', 'completion_requested', 'due_date', 'created_by', 'created_at', 'updated_at'
+            'assignees', 'assignees_detail',
+            'status', 'priority', 'completion_requested', 'due_date',
+            'created_by', 'created_at', 'updated_at', 'attachments',
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
+
+    def get_assignees_detail(self, obj):
+        return [
+            {'id': u.id, 'full_name': u.full_name, 'initials': u.initials}
+            for u in obj.assignees.all()
+        ]
 
     def validate_assignee(self, value):
         if value:
@@ -95,6 +124,30 @@ class TaskSerializer(serializers.ModelSerializer):
                 if value.company_id != user_company.id:
                     raise serializers.ValidationError("Assignee must belong to your company.")
         return value
+
+    def validate_assignees(self, value):
+        if value:
+            request = self.context.get('request')
+            if request and request.user and request.user.is_authenticated:
+                user_company = request.user.company or request.user.get_or_create_company()
+                for u in value:
+                    if u.company_id != user_company.id:
+                        raise serializers.ValidationError(f"{u.full_name} does not belong to your company.")
+        return value
+
+    def create(self, validated_data):
+        assignees = validated_data.pop('assignees', [])
+        task = super().create(validated_data)
+        if assignees:
+            task.assignees.set(assignees)
+        return task
+
+    def update(self, instance, validated_data):
+        assignees = validated_data.pop('assignees', None)
+        task = super().update(instance, validated_data)
+        if assignees is not None:
+            task.assignees.set(assignees)
+        return task
 
 
 class ActivityLogSerializer(serializers.ModelSerializer):

@@ -115,6 +115,9 @@ class Task(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='assigned_tasks'
     )
+    assignees = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, blank=True, related_name='multi_assigned_tasks'
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
     # Set by an assignee (staff) to flag "I believe this is done" without letting them
@@ -133,6 +136,38 @@ class Task(models.Model):
 
     def __str__(self):
         return self.title
+
+
+# ---------------------------------------------------------------------------
+# TASK ATTACHMENTS
+# ---------------------------------------------------------------------------
+
+class TaskAttachment(models.Model):
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='attachments')
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, related_name='task_attachments'
+    )
+    file = models.FileField(upload_to='task_attachments/', storage=RawMediaCloudinaryStorage())
+    filename = models.CharField(max_length=255, blank=True)
+    file_size_mb = models.FloatField(null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def save(self, *args, **kwargs):
+        if not self.filename and self.file:
+            self.filename = self.file.name.split('/')[-1]
+        if self.file and not self.file_size_mb:
+            try:
+                self.file_size_mb = round(self.file.size / (1024 * 1024), 2)
+            except Exception:
+                pass
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.filename} → {self.task.title}"
 
 
 # ---------------------------------------------------------------------------

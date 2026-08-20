@@ -4,7 +4,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     register_user, signin_user, verify_email, resend_verification, change_password,
     UserListView, UserDetailView,
-    TaskListCreateView, TaskDetailView, RequestTaskCompletionView,
+    TaskListCreateView, TaskDetailView, RequestTaskCompletionView, TaskAttachmentView,
     ActivityLogListView, ActivityMarkAllReadView,
     BookingListCreateView, BookingDetailView,
     DocumentListCreateView, DocumentDetailView,
@@ -25,6 +25,8 @@ urlpatterns = [
     path('tasks/', TaskListCreateView.as_view(), name='task-list'),
     path('tasks/<int:pk>/', TaskDetailView.as_view(), name='task-detail'),
     path('tasks/<int:pk>/request-completion/', RequestTaskCompletionView.as_view(), name='task-request-completion'),
+    path('tasks/<int:pk>/attachments/', TaskAttachmentView.as_view(), name='task-attachments'),
+    path('tasks/<int:pk>/attachments/<int:att_id>/', TaskAttachmentView.as_view(), name='task-attachment-delete'),
 
     path('activity/', ActivityLogListView.as_view(), name='activity-list'),
     path('activity/mark-all-read/', ActivityMarkAllReadView.as_view(), name='activity-mark-all-read'),

@@ -14,9 +14,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from .models import Task, ActivityLog, Booking, Document, Invoice, PlatformSettings
+from .models import Task, TaskAttachment, ActivityLog, Booking, Document, Invoice, PlatformSettings
 from .serializers import (
-    RegisterSerializer, UserSerializer, TaskSerializer, ActivityLogSerializer,
+    RegisterSerializer, UserSerializer, TaskSerializer, TaskAttachmentSerializer, ActivityLogSerializer,
     BookingSerializer, DocumentSerializer, InvoiceSerializer, PlatformSettingsSerializer
 )
 from .permissions import IsOwnerOrAdmin, IsAdminUser
@@ -261,17 +261,23 @@ def resend_verification(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def change_password(request):
-    current = request.data.get('current_password')
     new_pw = request.data.get('new_password')
 
-    if not current or not new_pw:
-        return Response({"detail": "Both current_password and new_password are required."}, status=status.HTTP_400_BAD_REQUEST)
+    if not new_pw:
+        return Response({"detail": "new_password is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     if len(new_pw) < 8:
         return Response({"detail": "New password must be at least 8 characters."}, status=status.HTTP_400_BAD_REQUEST)
 
-    if not request.user.check_password(current):
-        return Response({"detail": "Current password is incorrect."}, status=status.HTTP_400_BAD_REQUEST)
+    # Admins must verify their current password; staff skip this check
+    # because they arrive via the auto-login verification flow and may
+    # not know the temporary password that was set for them.
+    if _is_admin(request.user):
+        current = request.data.get('current_password')
+        if not current:
+            return Response({"detail": "current_password is required for admins."}, status=status.HTTP_400_BAD_REQUEST)
+        if not request.user.check_password(current):
+            return Response({"detail": "Current password is incorrect."}, status=status.HTTP_400_BAD_REQUEST)
 
     request.user.set_password(new_pw)
     request.user.save(update_fields=['password'])
@@ -292,7 +298,9 @@ class TaskListCreateView(generics.ListCreateAPIView):
         if _is_admin(user):
             return Task.objects.filter(company=company)
         # Staff only ever see tasks assigned to them in their own company
-        return Task.objects.filter(company=company, assignee=user)
+        return Task.objects.filter(company=company).filter(
+            models.Q(assignee=user) | models.Q(assignees=user)
+        )
 
     def create(self, request, *args, **kwargs):
         if not _is_admin(request.user):
@@ -317,7 +325,9 @@ class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
         company = user.get_or_create_company()
         if _is_admin(user):
             return Task.objects.filter(company=company)
-        return Task.objects.filter(company=company, assignee=user)
+        return Task.objects.filter(company=company).filter(
+            models.Q(assignee=user) | models.Q(assignees=user)
+        )
 
     def update(self, request, *args, **kwargs):
         # Staff can view their assigned task detail, but only an admin can change
@@ -393,6 +403,61 @@ class RequestTaskCompletionView(generics.GenericAPIView):
 
         serializer = self.get_serializer(task)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class TaskAttachmentView(generics.GenericAPIView):
+    """
+    POST /api/tasks/<id>/attachments/  — upload a file to a task
+    DELETE /api/tasks/<id>/attachments/<att_id>/  — remove an attachment
+    Both admin and staff assignees can upload/delete.
+    """
+    serializer_class = TaskAttachmentSerializer
+    permission_classes = [IsAuthenticated]
+
+    def _get_task(self, request, pk):
+        company = request.user.company or request.user.get_or_create_company()
+        if _is_admin(request.user):
+            return Task.objects.filter(company=company, pk=pk).first()
+        return Task.objects.filter(company=company, pk=pk).filter(
+            models.Q(assignee=request.user) | models.Q(assignees=request.user)
+        ).first()
+
+    def post(self, request, pk):
+        task = self._get_task(request, pk)
+        if not task:
+            return Response({'detail': 'Task not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        file = request.FILES.get('file')
+        if not file:
+            return Response({'detail': 'No file provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if file.size > 10 * 1024 * 1024:
+            return Response({'detail': 'File exceeds 10MB limit.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        att = TaskAttachment.objects.create(
+            task=task,
+            uploaded_by=request.user,
+            file=file,
+            filename=file.name,
+        )
+        return Response(TaskAttachmentSerializer(att).data, status=status.HTTP_201_CREATED)
+
+    def delete(self, request, pk, att_id):
+        task = self._get_task(request, pk)
+        if not task:
+            return Response({'detail': 'Task not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            att = TaskAttachment.objects.get(pk=att_id, task=task)
+        except TaskAttachment.DoesNotExist:
+            return Response({'detail': 'Attachment not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Only uploader or admin can delete
+        if not _is_admin(request.user) and att.uploaded_by_id != request.user.id:
+            return Response({'detail': 'You can only delete your own attachments.'}, status=status.HTTP_403_FORBIDDEN)
+
+        att.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------
