@@ -209,7 +209,25 @@ def verify_email(request):
 
     user.is_verified = True
     user.save(update_fields=['is_verified'])
-    return Response({"detail": "Email verified successfully. You can sign in now."}, status=status.HTTP_200_OK)
+
+    refresh = RefreshToken.for_user(user)
+    company = user.company or user.get_or_create_company()
+    return Response({
+        "detail": "Email verified successfully.",
+        "tokens": {
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+        },
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role,
+            "company_id": company.id if company else None,
+            "company": company.id if company else None,
+            "company_name": company.name if company else None,
+        }
+    }, status=status.HTTP_200_OK)
 
 
 @extend_schema(
@@ -234,6 +252,30 @@ def resend_verification(request):
     if user and not user.is_verified:
         send_verification_email(user)
     return generic_response
+
+
+# ---------------------------------------------------------------------------
+# CHANGE PASSWORD
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    current = request.data.get('current_password')
+    new_pw = request.data.get('new_password')
+
+    if not current or not new_pw:
+        return Response({"detail": "Both current_password and new_password are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if len(new_pw) < 8:
+        return Response({"detail": "New password must be at least 8 characters."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not request.user.check_password(current):
+        return Response({"detail": "Current password is incorrect."}, status=status.HTTP_400_BAD_REQUEST)
+
+    request.user.set_password(new_pw)
+    request.user.save(update_fields=['password'])
+    return Response({"detail": "Password updated successfully."}, status=status.HTTP_200_OK)
 
 
 # ---------------------------------------------------------------------------

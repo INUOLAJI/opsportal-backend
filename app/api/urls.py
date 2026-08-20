@@ -2,7 +2,7 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
-    register_user, signin_user, verify_email, resend_verification,
+    register_user, signin_user, verify_email, resend_verification, change_password,
     UserListView, UserDetailView,
     TaskListCreateView, TaskDetailView, RequestTaskCompletionView,
     ActivityLogListView, ActivityMarkAllReadView,
@@ -17,6 +17,7 @@ urlpatterns = [
     path('auth/signin/', signin_user, name='signin_user'),
     path('auth/verify-email/', verify_email, name='verify_email'),
     path('auth/resend-verification/', resend_verification, name='resend_verification'),
+    path('auth/change-password/', change_password, name='change_password'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('users/', UserListView.as_view(), name='user-list'),
     path('users/<int:pk>/', UserDetailView.as_view(), name='user-detail'),
