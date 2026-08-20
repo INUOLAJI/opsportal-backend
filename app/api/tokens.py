@@ -1,3 +1,4 @@
+import html
 import logging
 
 import requests
@@ -24,7 +25,89 @@ class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
 email_verification_token = EmailVerificationTokenGenerator()
 
 
-def send_verification_email(user, request=None):
+def _build_html_body(full_name, verify_link, temp_password):
+    """Simple table-based HTML with a button — inline styles only, since
+    that's what actually renders consistently across email clients."""
+    name = html.escape(full_name)
+    link = html.escape(verify_link)
+
+    password_block = ""
+    if temp_password:
+        pw = html.escape(temp_password)
+        password_block = f"""
+        <tr>
+          <td style="padding: 0 32px 24px 32px;">
+            <table cellpadding="0" cellspacing="0" width="100%" style="background:#F1F5F9;border-radius:8px;">
+              <tr>
+                <td style="padding:16px 20px;">
+                  <p style="margin:0 0 6px 0;font-size:13px;color:#475569;font-family:sans-serif;">
+                    Your temporary password
+                  </p>
+                  <p style="margin:0;font-size:18px;font-weight:600;color:#0F172A;font-family:monospace;letter-spacing:0.5px;">
+                    {pw}
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>"""
+
+    return f"""
+    <table cellpadding="0" cellspacing="0" width="100%" style="background:#F8FAFC;padding:32px 0;">
+      <tr>
+        <td align="center">
+          <table cellpadding="0" cellspacing="0" width="480" style="background:#FFFFFF;border-radius:12px;overflow:hidden;font-family:sans-serif;">
+            <tr>
+              <td style="padding:32px 32px 8px 32px;">
+                <p style="margin:0 0 4px 0;font-size:12px;font-weight:600;letter-spacing:1px;color:#64748B;text-transform:uppercase;">
+                  OpsPortal
+                </p>
+                <h1 style="margin:0 0 16px 0;font-size:20px;color:#0F172A;">
+                  Confirm your account
+                </h1>
+                <p style="margin:0 0 24px 0;font-size:14px;line-height:1.6;color:#334155;">
+                  Hi {name}, an admin created a staff account for you on OpsPortal.
+                  Follow the steps below to activate it.
+                </p>
+              </td>
+            </tr>
+            {password_block}
+            <tr>
+              <td style="padding:0 32px 24px 32px;">
+                <ol style="margin:0;padding-left:18px;font-size:14px;line-height:1.8;color:#334155;">
+                  <li>Click the button below to confirm your email address.</li>
+                  <li>Sign in using this email and the temporary password above.</li>
+                  <li>Once signed in, update your password from your account settings.</li>
+                </ol>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 32px 32px;" align="center">
+                <a href="{link}"
+                   style="display:inline-block;background:#0F172A;color:#FFFFFF;text-decoration:none;
+                          font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;">
+                  Confirm Email &amp; Get Started
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 32px 32px;">
+                <p style="margin:0;font-size:12px;color:#94A3B8;line-height:1.6;">
+                  If the button doesn't work, copy and paste this link into your browser:<br>
+                  <a href="{link}" style="color:#3B82F6;">{link}</a>
+                </p>
+                <p style="margin:16px 0 0 0;font-size:12px;color:#94A3B8;">
+                  If you weren't expecting this, you can safely ignore this email.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>"""
+
+
+def send_verification_email(user, request=None, temp_password=None):
     """Emails a one-time verification link to a newly-invited staff member.
 
     Django generates the uid/token and owns verification (see verify_email
@@ -34,6 +117,12 @@ def send_verification_email(user, request=None):
     connect from there. Requires BREVO_API_KEY and BREVO_FROM_EMAIL to be
     set (see settings.py); BREVO_FROM_EMAIL must be an address verified
     under Brevo's "Add a Sender" flow.
+
+    temp_password, when provided, is shown in the email so the invited
+    staffer knows what to sign in with — it's only available here because
+    RegisterSerializer.create() passes it through before create_user()
+    hashes it; it is never stored or retrievable after that point, so
+    resend_verification() (called after account creation) can't include it.
     """
     uid = urlsafe_base64_encode(force_bytes(user.pk))
     token = email_verification_token.make_token(user)
@@ -51,19 +140,27 @@ def send_verification_email(user, request=None):
         user.verification_email_sent = False
         return False
 
+    password_line = (
+        f"Your temporary password: {temp_password}\n\n" if temp_password else ""
+    )
     body_text = (
         f"Hi {user.full_name},\n\n"
-        f"An admin has created a staff account for you on OpsPortal. "
-        f"Confirm your email address to activate your account and sign in:\n\n"
-        f"{verify_link}\n\n"
+        f"An admin has created a staff account for you on OpsPortal.\n\n"
+        f"{password_line}"
+        f"1. Confirm your email address using the link below.\n"
+        f"2. Sign in using this email and password above.\n"
+        f"3. Update your password from your account settings once signed in.\n\n"
+        f"Confirm your email: {verify_link}\n\n"
         f"If you weren't expecting this, you can ignore this email.\n"
     )
+    body_html = _build_html_body(user.full_name, verify_link, temp_password)
 
     payload = {
         "sender": {"name": "OpsPortal", "email": from_email},
         "to": [{"email": user.email, "name": user.full_name}],
         "subject": "Confirm your OpsPortal account",
         "textContent": body_text,
+        "htmlContent": body_html,
     }
 
     try:

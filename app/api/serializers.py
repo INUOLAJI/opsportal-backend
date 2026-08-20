@@ -54,12 +54,16 @@ class RegisterSerializer(serializers.ModelSerializer):
             c_name = company_name.strip() if company_name else f"{validated_data.get('full_name')}'s Workspace"
             company = Company.objects.create(name=c_name)
 
+        raw_password = validated_data.get('password')
         user = User.objects.create_user(company=company, **validated_data)
 
         if role == 'staff':
             user.is_verified = False
             user.save(update_fields=['is_verified'])
-            send_verification_email(user)
+            # Pass the raw password through while we still have it — it's
+            # hashed the moment create_user() saves the model, so this is
+            # the only point it's available for the invite email.
+            send_verification_email(user, temp_password=raw_password)
         return user
 
 
