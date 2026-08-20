@@ -35,6 +35,16 @@ def send_verification_email(user, request=None):
     frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173').rstrip('/')
     verify_link = f"{frontend_url}/verify-email?uid={uid}&token={token}"
 
+    # TEMP DIAGNOSTIC: print() always reaches Render's free Logs tab even if
+    # the logging module isn't wired up the way we expect. Safe to remove
+    # once email delivery is confirmed working.
+    print(
+        f"[verify-email] attempting send to={user.email} "
+        f"host_user={'set' if settings.EMAIL_HOST_USER else 'MISSING'} "
+        f"host_password_len={len(settings.EMAIL_HOST_PASSWORD or '')} "
+        f"from={settings.DEFAULT_FROM_EMAIL!r}"
+    )
+
     if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
         logger.error(
             "Cannot send verification email to %s: EMAIL_HOST_USER / "
@@ -60,9 +70,12 @@ def send_verification_email(user, request=None):
             recipient_list=[user.email],
             fail_silently=False,
         )
+        print(f"[verify-email] send_mail() returned OK for {user.email}")
         user.verification_email_sent = True
         return True
-    except Exception as e:
-        logger.error("Failed to send verification email to %s: %s", user.email, e)
+    except Exception:
+        # logger.exception logs the full traceback, not just str(e) — this
+        # is what tells us WHICH step failed (DNS, auth, TLS handshake, etc).
+        logger.exception("Failed to send verification email to %s", user.email)
         user.verification_email_sent = False
         return False
