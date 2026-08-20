@@ -1,12 +1,14 @@
 import logging
 
+import requests
 from django.conf import settings
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
-from django.core.mail import send_mail
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
 logger = logging.getLogger(__name__)
+
+BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email"
 
 
 class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
@@ -26,35 +28,30 @@ def send_verification_email(user, request=None):
     """Emails a one-time verification link to a newly-invited staff member.
 
     Django generates the uid/token and owns verification (see verify_email
-    in views.py), and also sends the email itself via Gmail SMTP using
-    EMAIL_HOST_USER / EMAIL_HOST_PASSWORD (a Gmail App Password). No
-    third-party domain verification required.
+    in views.py). Delivery goes through Brevo's HTTP API (port 443) rather
+    than SMTP, since Render's free tier blocks outbound SMTP ports
+    (25/465/587) entirely — SMTP credentials, however correct, can never
+    connect from there. Requires BREVO_API_KEY and BREVO_FROM_EMAIL to be
+    set (see settings.py); BREVO_FROM_EMAIL must be an address verified
+    under Brevo's "Add a Sender" flow.
     """
     uid = urlsafe_base64_encode(force_bytes(user.pk))
     token = email_verification_token.make_token(user)
     frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173').rstrip('/')
     verify_link = f"{frontend_url}/verify-email?uid={uid}&token={token}"
 
-    # TEMP DIAGNOSTIC: print() always reaches Render's free Logs tab even if
-    # the logging module isn't wired up the way we expect. Safe to remove
-    # once email delivery is confirmed working.
-    print(
-        f"[verify-email] attempting send to={user.email} "
-        f"host_user={'set' if settings.EMAIL_HOST_USER else 'MISSING'} "
-        f"host_password_len={len(settings.EMAIL_HOST_PASSWORD or '')} "
-        f"from={settings.DEFAULT_FROM_EMAIL!r}"
-    )
+    api_key = getattr(settings, 'BREVO_API_KEY', '')
+    from_email = getattr(settings, 'BREVO_FROM_EMAIL', '')
 
-    if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
+    if not api_key or not from_email:
         logger.error(
-            "Cannot send verification email to %s: EMAIL_HOST_USER / "
-            "EMAIL_HOST_PASSWORD not configured.", user.email
+            "Cannot send verification email to %s: BREVO_API_KEY / "
+            "BREVO_FROM_EMAIL not configured.", user.email
         )
         user.verification_email_sent = False
         return False
 
-    subject = "Confirm your OpsPortal account"
-    message = (
+    body_text = (
         f"Hi {user.full_name},\n\n"
         f"An admin has created a staff account for you on OpsPortal. "
         f"Confirm your email address to activate your account and sign in:\n\n"
@@ -62,20 +59,37 @@ def send_verification_email(user, request=None):
         f"If you weren't expecting this, you can ignore this email.\n"
     )
 
+    payload = {
+        "sender": {"name": "OpsPortal", "email": from_email},
+        "to": [{"email": user.email, "name": user.full_name}],
+        "subject": "Confirm your OpsPortal account",
+        "textContent": body_text,
+    }
+
     try:
-        send_mail(
-            subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
+        resp = requests.post(
+            BREVO_SEND_URL,
+            json=payload,
+            headers={
+                "api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            timeout=10,
         )
-        print(f"[verify-email] send_mail() returned OK for {user.email}")
+        # Brevo returns 201 Created with a messageId on success.
+        if resp.status_code >= 400:
+            logger.error(
+                "Brevo failed to send verification email to %s: %s %s",
+                user.email, resp.status_code, resp.text
+            )
+            user.verification_email_sent = False
+            return False
+
+        print(f"[verify-email] Brevo accepted send for {user.email} (status {resp.status_code})")
         user.verification_email_sent = True
         return True
-    except Exception:
-        # logger.exception logs the full traceback, not just str(e) — this
-        # is what tells us WHICH step failed (DNS, auth, TLS handshake, etc).
-        logger.exception("Failed to send verification email to %s", user.email)
+    except requests.RequestException:
+        logger.exception("Failed to reach Brevo for %s", user.email)
         user.verification_email_sent = False
         return False

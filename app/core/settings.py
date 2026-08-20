@@ -212,23 +212,22 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
 # EMAIL (staff verification links)
 # ---------------------------------------------------------------------------
 # Django generates the uid/token and owns verification itself (see
-# verify_email in views.py) and now also sends the email directly via
-# Gmail SMTP using django.core.mail — no third-party domain verification
-# needed. Set these in the environment (Render):
-#   EMAIL_HOST_USER       the Gmail address sending the emails
-#   EMAIL_HOST_PASSWORD   a 16-character Gmail "App Password" (NOT your
-#                          normal Gmail password — generate one at
-#                          https://myaccount.google.com/apppasswords,
-#                          requires 2-Step Verification enabled on the account)
+# verify_email in views.py). Delivery goes through Brevo's HTTP API
+# (see tokens.py) rather than raw SMTP — Render's free tier blocks outbound
+# SMTP ports (25/465/587) entirely, so no SMTP provider can work here
+# regardless of credentials. Brevo's API runs over HTTPS (443), which
+# Render always allows.
+#
+# Set these in the environment (Render):
+#   BREVO_API_KEY     from Brevo dashboard -> Settings -> SMTP & API ->
+#                      API Keys
+#   BREVO_FROM_EMAIL  the exact address verified under Senders, Domains &
+#                      Dedicated IPs -> Senders -> Add a Sender (domain
+#                      authentication is NOT required for this)
 # Without these set, send_verification_email() logs an error and returns
 # False instead of sending (see tokens.py).
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
-EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
+BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
+BREVO_FROM_EMAIL = os.environ.get('BREVO_FROM_EMAIL', '')
 
 # Used to build the verification link staff click from their inbox.
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://opsportal-ten.vercel.app')
