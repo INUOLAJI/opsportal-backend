@@ -555,7 +555,16 @@ class UserListView(generics.ListAPIView):
         user = self.request.user
         company = user.company or user.get_or_create_company()
         # Strictly return users belonging to the request user's company
-        return User.objects.filter(company=company)
+        queryset = User.objects.filter(company=company)
+
+        # Optional ?role=staff (or ?role=admin) to narrow results — used by
+        # the task assignee dropdown so only staff show up as assignable,
+        # while other callers (e.g. the Team page) can omit it to see everyone.
+        role = self.request.query_params.get('role')
+        if role in ('staff', 'admin'):
+            queryset = queryset.filter(role=role)
+
+        return queryset
 
 
 class UserDetailView(generics.RetrieveDestroyAPIView):
