@@ -32,6 +32,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         company_name = validated_data.pop('company_name', None)
         company_phone = validated_data.pop('company_phone', '')
         company_address = validated_data.pop('company_address', '')
+        raw_password = validated_data.pop('password', None)
         role = validated_data.get('role', 'staff')
 
         request = self.context.get('request')
@@ -54,16 +55,13 @@ class RegisterSerializer(serializers.ModelSerializer):
             c_name = company_name.strip() if company_name else f"{validated_data.get('full_name')}'s Workspace"
             company = Company.objects.create(name=c_name)
 
-        raw_password = validated_data.get('password')
-        user = User.objects.create_user(company=company, **validated_data)
+        user = User.objects.create_user(company=company, password=raw_password, **validated_data)
 
         if role == 'staff':
             user.is_verified = False
             user.save(update_fields=['is_verified'])
-            # Pass the raw password through while we still have it — it's
-            # hashed the moment create_user() saves the model, so this is
-            # the only point it's available for the invite email.
             send_verification_email(user, temp_password=raw_password)
+            
         return user
 
 
@@ -111,9 +109,6 @@ class ActivityLogSerializer(serializers.ModelSerializer):
 
     def get_is_read(self, obj):
         request = self.context.get('request')
-        # Freshly-created activities broadcast over WebSocket are serialized
-        # without a request in context — treat those as unread by default,
-        # which is correct since nobody has seen them yet.
         if not request or not request.user or not request.user.is_authenticated:
             return False
         return obj.read_by.filter(pk=request.user.pk).exists()
