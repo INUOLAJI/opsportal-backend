@@ -33,7 +33,7 @@ def _build_html_body(full_name, verify_link, temp_password):
 
     password_block = ""
     if temp_password:
-        pw = html.escape(temp_password)
+        pw = html.escape(str(temp_password))
         password_block = f"""
         <tr>
           <td style="padding: 0 32px 24px 32px;">
@@ -108,22 +108,7 @@ def _build_html_body(full_name, verify_link, temp_password):
 
 
 def send_verification_email(user, request=None, temp_password=None):
-    """Emails a one-time verification link to a newly-invited staff member.
-
-    Django generates the uid/token and owns verification (see verify_email
-    in views.py). Delivery goes through Brevo's HTTP API (port 443) rather
-    than SMTP, since Render's free tier blocks outbound SMTP ports
-    (25/465/587) entirely — SMTP credentials, however correct, can never
-    connect from there. Requires BREVO_API_KEY and BREVO_FROM_EMAIL to be
-    set (see settings.py); BREVO_FROM_EMAIL must be an address verified
-    under Brevo's "Add a Sender" flow.
-
-    temp_password, when provided, is shown in the email so the invited
-    staffer knows what to sign in with — it's only available here because
-    RegisterSerializer.create() passes it through before create_user()
-    hashes it; it is never stored or retrievable after that point, so
-    resend_verification() (called after account creation) can't include it.
-    """
+    """Emails a one-time verification link to a newly-invited staff member."""
     uid = urlsafe_base64_encode(force_bytes(user.pk))
     token = email_verification_token.make_token(user)
     frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173').rstrip('/')
@@ -174,7 +159,6 @@ def send_verification_email(user, request=None, temp_password=None):
             },
             timeout=10,
         )
-        # Brevo returns 201 Created with a messageId on success.
         if resp.status_code >= 400:
             logger.error(
                 "Brevo failed to send verification email to %s: %s %s",
