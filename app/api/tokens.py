@@ -31,7 +31,6 @@ def _build_html_body(full_name, verify_link, temp_password):
     name = html.escape(full_name)
     link = html.escape(verify_link)
 
-    password_block = ""
     if temp_password:
         pw = html.escape(str(temp_password))
         password_block = f"""
@@ -45,6 +44,22 @@ def _build_html_body(full_name, verify_link, temp_password):
                   </p>
                   <p style="margin:0;font-size:18px;font-weight:600;color:#0F172A;font-family:monospace;letter-spacing:0.5px;">
                     {pw}
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>"""
+    else:
+        password_block = """
+        <tr>
+          <td style="padding: 0 32px 24px 32px;">
+            <table cellpadding="0" cellspacing="0" width="100%" style="background:#FFF7ED;border-radius:8px;">
+              <tr>
+                <td style="padding:16px 20px;">
+                  <p style="margin:0;font-size:13px;color:#92400E;font-family:sans-serif;line-height:1.5;">
+                    Your password was set when your account was first created.
+                    If you don&#39;t have it, contact your admin to reset it.
                   </p>
                 </td>
               </tr>
@@ -125,15 +140,18 @@ def send_verification_email(user, request=None, temp_password=None):
         user.verification_email_sent = False
         return False
 
-    password_line = (
-        f"Your temporary password: {temp_password}\n\n" if temp_password else ""
-    )
+    if temp_password:
+        password_line = f"Your temporary password: {temp_password}\n\n"
+        step2 = "Sign in using this email and the temporary password above."
+    else:
+        password_line = "Your password was set when your account was created. If you don't have it, contact your admin.\n\n"
+        step2 = "Sign in using this email and your password (contact your admin if you don't have it)."
     body_text = (
         f"Hi {user.full_name},\n\n"
         f"An admin has created a staff account for you on OpsPortal.\n\n"
         f"{password_line}"
         f"1. Confirm your email address using the link below.\n"
-        f"2. Sign in using this email and password above.\n"
+        f"2. {step2}\n"
         f"3. Update your password from your account settings once signed in.\n\n"
         f"Confirm your email: {verify_link}\n\n"
         f"If you weren't expecting this, you can ignore this email.\n"
