@@ -255,6 +255,67 @@ def resend_verification(request):
 
 
 # ---------------------------------------------------------------------------
+# COMPLETE PROFILE (staff first-login form after email verification)
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def complete_profile(request):
+    """
+    POST /api/auth/complete-profile/
+    Called once after a staff member verifies their email.
+    Accepts full_name, email, new_password, confirm_password.
+    Returns updated user data so the frontend can refresh the auth context.
+    """
+    full_name = request.data.get('full_name', '').strip()
+    email = request.data.get('email', '').strip()
+    new_password = request.data.get('new_password', '')
+    confirm_password = request.data.get('confirm_password', '')
+
+    if not full_name:
+        return Response({'detail': 'Full name is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not email:
+        return Response({'detail': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not new_password:
+        return Response({'detail': 'Password is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(new_password) < 8:
+        return Response({'detail': 'Password must be at least 8 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+    if new_password != confirm_password:
+        return Response({'detail': 'Passwords do not match.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Check email uniqueness if it changed
+    user = request.user
+    if email.lower() != user.email.lower():
+        if User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists():
+            return Response({'detail': 'That email address is already in use.'}, status=status.HTTP_400_BAD_REQUEST)
+        user.email = email
+
+    user.full_name = full_name
+    user.set_password(new_password)
+    user.save(update_fields=['full_name', 'email', 'password'])
+
+    # Issue fresh tokens since the password changed
+    refresh = RefreshToken.for_user(user)
+    company = user.company or user.get_or_create_company()
+    return Response({
+        'detail': 'Profile completed successfully.',
+        'tokens': {
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        },
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'full_name': user.full_name,
+            'role': user.role,
+            'company_id': company.id if company else None,
+            'company': company.id if company else None,
+            'company_name': company.name if company else None,
+        }
+    }, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
 # CHANGE PASSWORD
 # ---------------------------------------------------------------------------
 
