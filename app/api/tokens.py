@@ -25,6 +25,102 @@ class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
 email_verification_token = EmailVerificationTokenGenerator()
 
 
+class PasswordResetTokenGenerator(PasswordResetTokenGenerator):
+    """Uses Django's built-in reset token generator — invalidates after
+    password changes, so reset links can't be replayed."""
+    pass
+
+
+password_reset_token = PasswordResetTokenGenerator()
+
+
+def send_password_reset_email(user):
+    """Emails a one-time password reset link to the user."""
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = password_reset_token.make_token(user)
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173').rstrip('/')
+    reset_link = f"{frontend_url}/reset-password?uid={uid}&token={token}"
+
+    api_key = getattr(settings, 'BREVO_API_KEY', '')
+    from_email = getattr(settings, 'BREVO_FROM_EMAIL', '')
+
+    if not api_key or not from_email:
+        logger.error(
+            "Cannot send password reset email to %s: BREVO_API_KEY / "
+            "BREVO_FROM_EMAIL not configured.", user.email
+        )
+        return False
+
+    link = html.escape(reset_link)
+    name = html.escape(user.full_name or user.email)
+
+    body_html = f"""
+    <table cellpadding="0" cellspacing="0" width="100%" style="background:#F8FAFC;padding:32px 0;">
+      <tr><td align="center">
+        <table cellpadding="0" cellspacing="0" width="480" style="background:#FFFFFF;border-radius:12px;overflow:hidden;font-family:sans-serif;">
+          <tr><td style="padding:32px 32px 8px 32px;">
+            <p style="margin:0 0 4px 0;font-size:12px;font-weight:600;letter-spacing:1px;color:#64748B;text-transform:uppercase;">OpsPortal</p>
+            <h1 style="margin:0 0 16px 0;font-size:20px;color:#0F172A;">Reset your password</h1>
+            <p style="margin:0 0 24px 0;font-size:14px;line-height:1.6;color:#334155;">
+              Hi {name}, we received a request to reset your OpsPortal password.
+              Click the button below to set a new one. This link expires in 1 hour.
+            </p>
+          </td></tr>
+          <tr><td style="padding:0 32px 32px 32px;" align="center">
+            <a href="{link}" style="display:inline-block;background:#3B82F6;color:#FFFFFF;text-decoration:none;
+               font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;">Reset Password</a>
+          </td></tr>
+          <tr><td style="padding:0 32px 32px 32px;">
+            <p style="margin:0;font-size:12px;color:#94A3B8;line-height:1.6;">
+              If the button doesn't work, copy and paste this link:<br>
+              <a href="{link}" style="color:#3B82F6;">{link}</a>
+            </p>
+            <p style="margin:16px 0 0 0;font-size:12px;color:#94A3B8;">
+              If you didn't request this, you can safely ignore this email.
+            </p>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>"""
+
+    body_text = (
+        f"Hi {user.full_name or user.email},\n\n"
+        f"Reset your OpsPortal password using the link below (expires in 1 hour):\n\n"
+        f"{reset_link}\n\n"
+        f"If you didn't request this, ignore this email.\n"
+    )
+
+    payload = {
+        "sender": {"name": "OpsPortal", "email": from_email},
+        "to": [{"email": user.email, "name": user.full_name or user.email}],
+        "subject": "Reset your OpsPortal password",
+        "textContent": body_text,
+        "htmlContent": body_html,
+    }
+
+    try:
+        resp = requests.post(
+            BREVO_SEND_URL,
+            json=payload,
+            headers={
+                "api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            timeout=10,
+        )
+        if resp.status_code >= 400:
+            logger.error(
+                "Brevo failed to send reset email to %s: %s %s",
+                user.email, resp.status_code, resp.text
+            )
+            return False
+        return True
+    except requests.RequestException:
+        logger.exception("Failed to reach Brevo for password reset %s", user.email)
+        return False
+
+
 def _build_html_body(full_name, verify_link, temp_password):
     """Simple table-based HTML with a button — inline styles only, since
     that's what actually renders consistently across email clients."""

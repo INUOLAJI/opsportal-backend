@@ -20,7 +20,7 @@ from .serializers import (
     BookingSerializer, DocumentSerializer, InvoiceSerializer, PlatformSettingsSerializer
 )
 from .permissions import IsOwnerOrAdmin, IsAdminUser
-from .tokens import email_verification_token, send_verification_email
+from .tokens import email_verification_token, send_verification_email, password_reset_token, send_password_reset_email
 
 User = get_user_model()
 
@@ -252,6 +252,65 @@ def resend_verification(request):
     if user and not user.is_verified:
         send_verification_email(user)
     return generic_response
+
+
+# ---------------------------------------------------------------------------
+# FORGOT / RESET PASSWORD
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
+def forgot_password(request):
+    """
+    POST /api/auth/forgot-password/
+    Always returns 200 so this can't be used to enumerate accounts.
+    """
+    email = request.data.get('email', '').strip()
+    if email:
+        user = User.objects.filter(email__iexact=email).first()
+        if user and user.is_active:
+            send_password_reset_email(user)
+    return Response(
+        {'detail': 'If an account with that email exists, a reset link has been sent.'},
+        status=status.HTTP_200_OK
+    )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
+def reset_password(request):
+    """
+    POST /api/auth/reset-password/
+    Validates uid + token then sets the new password.
+    """
+    uid = request.data.get('uid')
+    token = request.data.get('token')
+    new_password = request.data.get('new_password', '')
+    confirm_password = request.data.get('confirm_password', '')
+
+    if not uid or not token:
+        return Response({'detail': 'Invalid reset link.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not new_password:
+        return Response({'detail': 'Password is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(new_password) < 8:
+        return Response({'detail': 'Password must be at least 8 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+    if new_password != confirm_password:
+        return Response({'detail': 'Passwords do not match.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user_pk = force_str(urlsafe_base64_decode(uid))
+        user = User.objects.get(pk=user_pk)
+    except (User.DoesNotExist, ValueError, TypeError, OverflowError):
+        return Response({'detail': 'This reset link is invalid.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not password_reset_token.check_token(user, token):
+        return Response({'detail': 'This reset link is invalid or has expired.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.set_password(new_password)
+    user.save(update_fields=['password'])
+    return Response({'detail': 'Password reset successfully. You can now sign in.'}, status=status.HTTP_200_OK)
 
 
 # ---------------------------------------------------------------------------
