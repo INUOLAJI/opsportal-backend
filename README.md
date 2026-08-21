@@ -1,154 +1,271 @@
 # OpsPortal — Backend
 
-Django + Django REST Framework API for OpsPortal, with real-time updates over
-WebSockets (Django Channels) and file storage on Cloudinary.
+A multi-tenant operations management API built with Django REST Framework. Handles authentication, task management, document storage, bookings, invoices, activity logging, and real-time WebSocket updates.
 
-## Stack
+---
 
-- Django 5.1 / Django REST Framework
-- PostgreSQL (via `psycopg` v3)
-- Django Channels + Daphne (ASGI, WebSockets) — Redis-backed in production,
-  falls back to an in-memory channel layer if `REDIS_URL` isn't set (fine for
-  local dev, not for multi-process production)
-- JWT auth via `djangorestframework-simplejwt`
-- Cloudinary for document storage
+## Live API
 
-## Project layout
+**Base URL:** `https://opsportal-backend-n1jf.onrender.com/api`
+
+**Swagger UI:** [/api/schema/swagger/](https://opsportal-backend-n1jf.onrender.com/api/schema/swagger/)
+
+**ReDoc:** [/api/schema/redoc/](https://opsportal-backend-n1jf.onrender.com/api/schema/redoc/)
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Django 5.1, Django REST Framework 3.15 |
+| Auth | JWT via `djangorestframework-simplejwt` |
+| Database | PostgreSQL (Supabase) via `psycopg` v3 |
+| Real-time | Django Channels 4 + Daphne (WebSockets) |
+| Channel Layer | Redis (Upstash) |
+| File Storage | Cloudinary via `django-cloudinary-storage` |
+| Email | Brevo HTTP API (SMTP blocked on Render free tier) |
+| API Docs | `drf-spectacular` (Swagger / ReDoc) |
+| Hosting | Render (ASGI via Daphne) |
+
+---
+
+## Features
+
+- Multi-tenant isolation — every resource is scoped to a `Company`
+- Admin and staff roles with separate permission levels
+- Staff invite flow — admin creates staff account, Brevo sends verification email with temp password
+- Staff profile completion form on first login (set full name, email, new password)
+- Forgot / reset password via emailed token link
+- JWT authentication with access token refresh and refresh token blacklisting on logout
+- Tasks with multi-assignee support (ManyToMany), priority levels, due dates, and completion request workflow
+- File attachments on tasks (Cloudinary, 10MB limit)
+- Document vault with per-staff assignment
+- Bookings, invoices, activity log, and platform settings per company
+- Real-time WebSocket push for task and activity events (no polling needed)
+
+---
+
+## Project Structure
 
 ```
-app/
-  core/            # settings, ASGI/WSGI entrypoints, root URLconf
-  api/
-    models.py       # User, Task, ActivityLog, Booking, Document, Invoice, PlatformSettings
-    serializers.py
-    views.py
-    urls.py
-    permissions.py  # IsAdminUser, IsOwnerOrAdmin
-    consumers.py     # WebSocket consumer for real-time task/activity updates
-    routing.py       # WebSocket URL routing
-    jwt_auth_middleware.py  # authenticates WS connections via ?token=
-requirements.txt
+backend/
+└── app/
+    ├── api/
+    │   ├── migrations/         # Database migrations
+    │   ├── models.py           # Company, User, Task, TaskAttachment,
+    │   │                       # ActivityLog, Booking, Document,
+    │   │                       # Invoice, PlatformSettings
+    │   ├── serializers.py      # DRF serializers for all models
+    │   ├── views.py            # All API views and auth endpoints
+    │   ├── urls.py             # URL routing
+    │   ├── tokens.py           # Email verification + password reset
+    │   │                       # token generators and Brevo email helpers
+    │   ├── consumers.py        # WebSocket consumer (Channels)
+    │   ├── routing.py          # WebSocket URL routing
+    │   ├── jwt_auth_middleware.py  # Token auth for WS connections
+    │   └── permissions.py      # IsOwnerOrAdmin, IsAdminUser
+    └── core/
+        ├── settings.py
+        ├── urls.py
+        ├── asgi.py             # ASGI entry point (HTTP + WebSocket)
+        └── wsgi.py
 ```
 
-## Data model
+---
 
-- **User** — custom user model (`api.User`), email as username, `role` is
-  `staff` or `admin`.
-- **Task** — internal to-dos. `status` (pending/in_progress/overdue/complete),
-  `priority` (low/medium/high/urgent), `assignee`, `completion_requested`
-  (staff flag it for review; only an admin can actually set `status=complete`).
-- **ActivityLog** — feeds the notification bell / activity feed. `read_by` is
-  a per-user M2M so each admin has independent read state.
-- **Booking** — client self-scheduling.
-- **Document** — Cloudinary-backed uploads, optional `assigned_to` so an
-  admin can share a doc directly into a specific staff member's view.
-- **Invoice** — billing records tied to a client and optionally a booking.
-- **PlatformSettings** — single global row (enforced via `PlatformSettings.load()`)
-  backing the Settings page: workspace title, environment stage, notification
-  toggles, MFA enforcement flag, and secret-key rotation timestamp.
+## API Endpoints
 
-## Permissions model
+### Auth — `/api/auth/`
 
-- Staff only ever see their **own** tasks, documents, bookings, and invoices.
-  Admins see everything.
-- Only admins can create/edit/delete tasks, and only admins can PATCH
-  `PlatformSettings` or rotate the secret key — staff get 403s.
-- Staff flag a task done via `POST /tasks/<id>/request-completion/`; an admin
-  still has to confirm by setting `status=complete`.
-- Login no longer checks a `role` sent by the client against `user.role` —
-  the frontend has one shared sign-in page for both admins and staff, and
-  the account's real role is looked up server-side and returned in the
-  response, not asserted by the caller.
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/auth/signup/` | No | Register a new admin + company |
+| POST | `/auth/signin/` | No | Sign in, returns JWT tokens |
+| POST | `/auth/verify-email/` | No | Verify staff email, returns JWT tokens |
+| POST | `/auth/resend-verification/` | No | Resend verification email |
+| POST | `/auth/forgot-password/` | No | Send password reset email |
+| POST | `/auth/reset-password/` | No | Reset password via uid + token |
+| POST | `/auth/complete-profile/` | Yes | Staff first-login: set name, email, password |
+| POST | `/auth/change-password/` | Yes | Change password (staff skip current password check) |
+| POST | `/auth/token/refresh/` | No | Refresh access token |
 
-## Staff email verification
+### Tasks — `/api/tasks/`
 
-Admin-created staff accounts start with `is_verified=False` and can't sign
-in until they click the link emailed to them (see `tokens.py` /
-`send_verification_email`). Admin accounts are verified implicitly on
-signup (no inviter to send a link from).
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/tasks/` | Yes | List tasks (admin: all; staff: assigned only) |
+| POST | `/tasks/` | Admin | Create a task |
+| GET | `/tasks/<id>/` | Yes | Get task detail |
+| PATCH | `/tasks/<id>/` | Admin | Update task |
+| DELETE | `/tasks/<id>/` | Admin | Delete task |
+| POST | `/tasks/<id>/request-completion/` | Staff | Flag task as done for admin review |
+| POST | `/tasks/<id>/attachments/` | Yes | Upload file attachment (max 10MB) |
+| DELETE | `/tasks/<id>/attachments/<att_id>/` | Yes | Delete attachment |
 
-Delivery goes through **Brevo's HTTP API**, not SMTP — Render's free tier
-blocks all outbound SMTP ports (25/465/587) regardless of provider or
-credentials, so `django.core.mail`'s SMTP backend can never connect from
-there. Brevo's API runs over HTTPS (443), which Render always allows.
-(Earlier attempts — a Supabase Edge Function + Resend, then Gmail SMTP,
-then SendGrid — were dropped for domain-verification friction, the SMTP
-port block, and a signup blocker, respectively.)
+### Documents — `/api/documents/`
 
-Requires `BREVO_API_KEY` and `BREVO_FROM_EMAIL` (see Environment variables
-below). `BREVO_FROM_EMAIL` only needs **single-sender verification** in
-Brevo's dashboard (click a confirmation link) — no domain DNS setup
-required.
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/documents/` | Yes | List documents (admin: all; staff: own + assigned) |
+| POST | `/documents/` | Yes | Upload document to vault |
+| DELETE | `/documents/<id>/` | Yes | Delete document |
 
-## API endpoints
+### Activity — `/api/activity/`
 
-| Method | Path | Notes |
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/activity/` | Yes | List recent activity (last 20) |
+| POST | `/activity/mark-all-read/` | Yes | Mark all activity as read |
+
+### Users — `/api/users/`
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/users/` | Yes | List company users (filter with `?role=staff`) |
+| DELETE | `/users/<id>/` | Admin | Remove a team member |
+
+### Bookings — `/api/bookings/`
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/bookings/` | Yes | List bookings |
+| POST | `/bookings/` | Yes | Create booking |
+| GET/PATCH/DELETE | `/bookings/<id>/` | Yes | Manage booking |
+
+### Invoices — `/api/invoices/`
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/invoices/` | Yes | List invoices |
+| POST | `/invoices/` | Yes | Create invoice |
+| GET/PATCH/DELETE | `/invoices/<id>/` | Yes | Manage invoice |
+
+### Settings — `/api/settings/`
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET/PATCH | `/settings/` | Yes | Get or update platform settings (PATCH: admin only) |
+| POST | `/settings/rotate-secret/` | Admin | Rotate secret key timestamp |
+
+---
+
+## Data Models
+
+### Company
+Multi-tenancy root. Every user, task, document, booking, invoice, and activity belongs to a company.
+
+### User
+Custom user model extending `AbstractBaseUser`. Fields: `email`, `full_name`, `role` (admin/staff), `company` (FK), `is_verified`, `is_active`.
+
+### Task
+`title`, `tag`, `assignee` (FK, legacy single), `assignees` (M2M, multi-assignee), `status`, `priority`, `completion_requested`, `due_date`, `created_by`, `company`.
+
+### TaskAttachment
+`task` (FK), `uploaded_by` (FK), `file` (Cloudinary), `filename`, `file_size_mb`.
+
+### Document
+`title`, `category`, `file` (Cloudinary), `uploaded_by`, `assigned_to` (single FK), `company`.
+
+### ActivityLog
+`user`, `action`, `related_task`, `company`, `read_by` (M2M for per-user read state).
+
+---
+
+## WebSocket
+
+**URL:** `wss://opsportal-backend-n1jf.onrender.com/ws/dashboard/?token=<access_token>`
+
+Token is passed as a query param because browsers can't set custom headers on WebSocket connections.
+
+**Events pushed to client:**
+
+| Event type | Payload key | Trigger |
 |---|---|---|
-| POST | `/api/auth/signup/` | staff created this way are `is_verified=False` until they confirm via email |
-| POST | `/api/auth/signin/` | returns access + refresh tokens; blocks unverified staff (403, `code: "email_not_verified"`) |
-| POST | `/api/auth/token/refresh/` | |
-| POST | `/api/auth/verify-email/` | `{uid, token}` from the emailed link — sets `is_verified=True` |
-| POST | `/api/auth/resend-verification/` | `{email}` — always returns 200 (doesn't leak whether the account exists) |
-| GET | `/api/users/` | team list, for assignee pickers. Optional `?role=staff` or `?role=admin` to filter |
-| GET/POST | `/api/tasks/` | list scoped by role; create is admin-only |
-| GET/PATCH/DELETE | `/api/tasks/<id>/` | update/delete is admin-only |
-| POST | `/api/tasks/<id>/request-completion/` | staff-only, own tasks |
-| GET | `/api/activity/` | scoped by role |
-| POST | `/api/activity/mark-all-read/` | |
-| GET/POST | `/api/bookings/` | |
-| GET/PATCH/DELETE | `/api/bookings/<id>/` | |
-| GET/POST | `/api/documents/` | multipart upload |
-| GET/PATCH/DELETE | `/api/documents/<id>/` | |
-| GET/POST | `/api/invoices/` | |
-| GET/PATCH/DELETE | `/api/invoices/<id>/` | |
-| GET/PATCH | `/api/settings/` | PATCH is admin-only |
-| POST | `/api/settings/rotate-secret/` | admin-only |
+| `task_created` | `task` | New task created |
+| `task_updated` | `task` | Task status/fields changed |
+| `activity_created` | `activity` | New activity log entry |
 
-WebSocket: `ws(s)://<host>/ws/dashboard/?token=<access_token>` — broadcasts
-`task.created`, `task.updated`, and `activity.created` events to the admin
-group and to each staff member's personal group.
+---
 
-## Environment variables
+## Local Setup
 
-| Variable | Required | Notes |
-|---|---|---|
-| `SECRET_KEY` | recommended | falls back to a random key per-process if unset — fine for dev, not for prod (sessions/tokens won't survive a restart) |
-| `DEBUG` | no | `1`/`true` to enable, default off |
-| `ALLOWED_HOSTS` | prod | space-separated |
-| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` | yes | |
-| `REDIS_URL` | prod | enables the Redis channel layer for Channels; without it, WebSocket broadcast only works within a single process |
-| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | yes | document uploads |
-| `BREVO_API_KEY` | yes (for staff invites) | from Brevo dashboard → account menu → SMTP & API → API Keys |
-| `BREVO_FROM_EMAIL` | yes (for staff invites) | must be verified under Brevo → Senders, Domains & Dedicated IPs → Senders |
-| `FRONTEND_URL` | recommended | used to build the verification link staff click; defaults to the deployed Vercel URL |
+### Prerequisites
+- Python 3.11+
+- PostgreSQL (or a Supabase project)
+- Redis (or Upstash Redis for the channel layer)
 
-## Local setup
+### Installation
 
 ```bash
-python -m venv venv
-source venv/bin/activate           # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+git clone <repo-url>
+cd backend
 
-# .env — see the table above
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# Mac/Linux
+source .venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+### Environment Variables
+
+Create a `.env` file in `backend/`:
+
+```env
+SECRET_KEY=your-django-secret-key
+DEBUG=True
+ALLOWED_HOSTS=localhost,127.0.0.1
+
+# PostgreSQL
+POSTGRES_DB=postgres
+POSTGRES_USER=postgres.your-project-ref
+POSTGRES_PASSWORD=your-password
+POSTGRES_HOST=aws-0-eu-west-1.pooler.supabase.com
+POSTGRES_PORT=6543
+
+# Redis (channel layer)
+REDIS_URL=redis://localhost:6379
+
+# Cloudinary
+CLOUDINARY_CLOUD_NAME=your-cloud-name
+CLOUDINARY_API_KEY=your-api-key
+CLOUDINARY_API_SECRET=your-api-secret
+
+# Brevo (email)
+BREVO_API_KEY=your-brevo-api-key
+BREVO_FROM_EMAIL=noreply@yourdomain.com
+
+# Frontend URL (used in email links)
+FRONTEND_URL=http://localhost:5173
+```
+
+### Run
+
+```bash
 cd app
 python manage.py migrate
-python manage.py createsuperuser
-python manage.py runserver          # daphne-backed, serves HTTP + WS on one port
+python manage.py runserver
 ```
 
-CORS is currently allowlisted for `localhost:3000`, `localhost:5173`, and
-`127.0.0.1:3000` (see `CORS_ALLOWED_ORIGINS` in `core/settings.py`) — add your
-frontend's origin there if it differs.
+> The server runs via Daphne (ASGI) which handles both HTTP and WebSocket connections on the same port.
 
-## Migrations
+---
 
-After pulling model changes, always run:
+## Deployment (Render)
 
-```bash
-python manage.py makemigrations api
-python manage.py migrate
-```
+- Runtime: Python 3.11
+- Build command: `pip install -r requirements.txt`
+- Start command: `cd app && daphne -b 0.0.0.0 -p $PORT core.asgi:application`
+- All environment variables set in Render dashboard
+- Migrations must be written manually (no `manage.py` access on Render free tier)
 
-Don't hand-copy someone else's generated migration file into this repo —
-migration numbering depends on what's already applied locally; always
-generate your own from the current `models.py`.
+> **Note:** Render free tier spins down after inactivity. The first request after a cold start may fail with a CORS-like error — this is a timeout, not a CORS misconfiguration. Use [cron-job.org](https://cron-job.org) to ping the API every 10 minutes to keep it warm.
+
+---
+
+## License
+
+MIT
