@@ -1,4 +1,5 @@
 from rest_framework import status, generics, permissions, serializers
+import os
 from django.contrib.auth import get_user_model, authenticate
 from django.db import models
 from django.utils import timezone
@@ -402,6 +403,39 @@ def change_password(request):
     request.user.set_password(new_pw)
     request.user.save(update_fields=['password'])
     return Response({"detail": "Password updated successfully."}, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# PROFILE AVATAR UPLOAD
+# ---------------------------------------------------------------------------
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def upload_avatar(request):
+    """
+    PATCH /api/auth/avatar/
+    Accepts multipart/form-data with a single 'avatar' image file.
+    """
+    avatar = request.FILES.get('avatar')
+    if not avatar:
+        return Response({'detail': 'No avatar file provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if avatar.size > 5 * 1024 * 1024:
+        return Response({'detail': 'Avatar must be under 5MB.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    ext = os.path.splitext(avatar.name)[1].lower()
+    if ext not in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
+        return Response({'detail': 'Only image files are allowed (jpg, png, webp, gif).'}, status=status.HTTP_400_BAD_REQUEST)
+
+    request.user.avatar = avatar
+    request.user.save(update_fields=['avatar'])
+
+    try:
+        avatar_url = request.user.avatar.url
+    except Exception:
+        avatar_url = None
+
+    return Response({'avatar_url': avatar_url}, status=status.HTTP_200_OK)
 
 
 # ---------------------------------------------------------------------------

@@ -53,6 +53,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     company = models.ForeignKey(
         Company, on_delete=models.CASCADE, null=True, blank=True, related_name='users'
     )
+    avatar = models.ImageField(
+        upload_to='avatars/', storage=RawMediaCloudinaryStorage(), null=True, blank=True
+    )
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     # Admins verify themselves implicitly by registering the company (no

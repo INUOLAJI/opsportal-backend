@@ -68,11 +68,18 @@ class RegisterSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source='company.name', read_only=True)
     company_id = serializers.IntegerField(source='company.id', read_only=True)
+    avatar_url = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'email', 'full_name', 'role', 'company', 'company_id', 'company_name', 'is_active', 'is_verified', 'date_joined']
+        fields = ['id', 'email', 'full_name', 'role', 'company', 'company_id', 'company_name', 'is_active', 'is_verified', 'date_joined', 'avatar_url']
         read_only_fields = ['id', 'company', 'company_id', 'company_name', 'date_joined']
+
+    def get_avatar_url(self, obj):
+        try:
+            return obj.avatar.url if obj.avatar else None
+        except Exception:
+            return None
 
 
 class TaskAttachmentSerializer(serializers.ModelSerializer):

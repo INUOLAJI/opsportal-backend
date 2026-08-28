@@ -17,6 +17,9 @@ django-cors-headers==4.6.0
 # settings.py changes needed.
 psycopg[binary]>=3.2.10,<3.4
 
+# --- Image processing (required for ImageField) ----------------------------
+Pillow>=10.0.0
+
 # --- File storage (Cloudinary) ---------------------------------------------
 django-cloudinary-storage==0.3.0
 cloudinary==1.41.0
