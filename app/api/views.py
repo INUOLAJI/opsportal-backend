@@ -1,4 +1,5 @@
 from rest_framework import status, generics, permissions, serializers
+import logging
 import os
 from django.contrib.auth import get_user_model, authenticate
 from django.db import models
@@ -21,9 +22,14 @@ from .serializers import (
     BookingSerializer, DocumentSerializer, InvoiceSerializer, PlatformSettingsSerializer
 )
 from .permissions import IsOwnerOrAdmin, IsAdminUser
-from .tokens import email_verification_token, send_verification_email, password_reset_token, send_password_reset_email
+from .tokens import (
+    email_verification_token, send_verification_email, password_reset_token,
+    send_password_reset_email, send_login_alert_email,
+)
+import threading
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 def _is_admin(user):
@@ -153,6 +159,18 @@ def signin_user(request):
 
         refresh = RefreshToken.for_user(user)
         company = user.company or user.get_or_create_company()
+
+        # Fire the login alert email in a background thread so a slow
+        # Brevo/geolocation call never delays the sign-in response, and a
+        # failure there can never break the login itself.
+        try:
+            threading.Thread(
+                target=send_login_alert_email,
+                args=(user, request),
+                daemon=True,
+            ).start()
+        except Exception:
+            logger.exception("Failed to dispatch login alert for %s", user.email)
 
         return Response({
             "message": "Authenticated successfully",

@@ -4,12 +4,15 @@ import logging
 import requests
 from django.conf import settings
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
+from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
+from user_agents import parse as parse_user_agent
 
 logger = logging.getLogger(__name__)
 
 BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email"
+IPAPI_URL = "https://ipapi.co/{ip}/json/"
 
 
 class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
@@ -287,4 +290,150 @@ def send_verification_email(user, request=None, temp_password=None):
     except requests.RequestException:
         logger.exception("Failed to reach Brevo for %s", user.email)
         user.verification_email_sent = False
+        return False
+
+
+# ---------------------------------------------------------------------------
+# LOGIN ALERT EMAIL
+# ---------------------------------------------------------------------------
+
+def get_client_ip(request):
+    """Render sits behind a proxy, so the real client IP is the first hop
+    in X-Forwarded-For, not REMOTE_ADDR (which would just be the proxy)."""
+    forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if forwarded_for:
+        return forwarded_for.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', '')
+
+
+def get_device_info(request):
+    """Parses the User-Agent header into a human-readable device/browser/OS
+    string, e.g. 'Chrome on Windows (Desktop)'."""
+    ua_string = request.META.get('HTTP_USER_AGENT', '')
+    if not ua_string:
+        return "Unknown device"
+    ua = parse_user_agent(ua_string)
+    device_type = "Mobile" if ua.is_mobile else "Tablet" if ua.is_tablet else "Desktop" if ua.is_pc else "Other"
+    browser = ua.browser.family or "Unknown browser"
+    os_name = ua.os.family or "Unknown OS"
+    return f"{browser} on {os_name} ({device_type})"
+
+
+def get_geo_location(ip):
+    """Best-effort IP geolocation via ipapi.co's free HTTPS endpoint (Render
+    blocks plain HTTP/SMTP, so this only uses HTTPS APIs). Returns a
+    'City, Region, Country' string, or 'Unknown location' if it can't be
+    resolved (private/local IPs, rate limits, network errors, etc)."""
+    if not ip or ip in ('127.0.0.1', 'localhost') or ip.startswith(('10.', '192.168.', '172.16.')):
+        return "Unknown location (local/private IP)"
+
+    try:
+        resp = requests.get(IPAPI_URL.format(ip=ip), timeout=5)
+        if resp.status_code != 200:
+            return "Unknown location"
+        data = resp.json()
+        if data.get('error'):
+            return "Unknown location"
+        parts = [data.get('city'), data.get('region'), data.get('country_name')]
+        location = ", ".join(p for p in parts if p)
+        return location or "Unknown location"
+    except (requests.RequestException, ValueError):
+        logger.warning("Geolocation lookup failed for IP %s", ip)
+        return "Unknown location"
+
+
+def send_login_alert_email(user, request):
+    """Emails the user a heads-up every time their account is signed into,
+    with device, location, IP and time — so staff/admins notice logins
+    that aren't theirs. Never raises: a failure here should never block or
+    break the sign-in flow itself."""
+    api_key = getattr(settings, 'BREVO_API_KEY', '')
+    from_email = getattr(settings, 'BREVO_FROM_EMAIL', '')
+
+    if not api_key or not from_email:
+        logger.error(
+            "Cannot send login alert to %s: BREVO_API_KEY / BREVO_FROM_EMAIL not configured.",
+            user.email
+        )
+        return False
+
+    ip = get_client_ip(request)
+    device = get_device_info(request)
+    location = get_geo_location(ip)
+    login_time = timezone.now().strftime("%B %d, %Y at %I:%M %p %Z") or timezone.now().isoformat()
+
+    name = html.escape(user.full_name or user.email)
+    safe_device = html.escape(device)
+    safe_location = html.escape(location)
+    safe_ip = html.escape(ip or "Unknown")
+    safe_time = html.escape(login_time)
+
+    body_html = f"""
+    <table cellpadding="0" cellspacing="0" width="100%" style="background:#F8FAFC;padding:32px 0;">
+      <tr><td align="center">
+        <table cellpadding="0" cellspacing="0" width="480" style="background:#FFFFFF;border-radius:12px;overflow:hidden;font-family:sans-serif;">
+          <tr><td style="padding:32px 32px 8px 32px;">
+            <p style="margin:0 0 4px 0;font-size:12px;font-weight:600;letter-spacing:1px;color:#64748B;text-transform:uppercase;">OpsPortal</p>
+            <h1 style="margin:0 0 16px 0;font-size:20px;color:#0F172A;">New sign-in to your account</h1>
+            <p style="margin:0 0 20px 0;font-size:14px;line-height:1.6;color:#334155;">
+              Hi {name}, we noticed a new sign-in to your OpsPortal account. If this was you, no action is needed.
+            </p>
+          </td></tr>
+          <tr><td style="padding:0 32px 24px 32px;">
+            <table cellpadding="0" cellspacing="0" width="100%" style="background:#F1F5F9;border-radius:8px;">
+              <tr><td style="padding:16px 20px;font-size:13px;color:#334155;font-family:sans-serif;line-height:2;">
+                <strong>Device:</strong> {safe_device}<br>
+                <strong>Location:</strong> {safe_location}<br>
+                <strong>IP address:</strong> {safe_ip}<br>
+                <strong>Time:</strong> {safe_time}
+              </td></tr>
+            </table>
+          </td></tr>
+          <tr><td style="padding:0 32px 32px 32px;">
+            <p style="margin:0;font-size:12px;color:#92400E;background:#FFF7ED;border-radius:8px;padding:12px 16px;line-height:1.6;">
+              If this wasn't you, change your password immediately and contact your admin.
+            </p>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>"""
+
+    body_text = (
+        f"Hi {user.full_name or user.email},\n\n"
+        f"New sign-in to your OpsPortal account:\n\n"
+        f"Device: {device}\n"
+        f"Location: {location}\n"
+        f"IP address: {ip or 'Unknown'}\n"
+        f"Time: {login_time}\n\n"
+        f"If this wasn't you, change your password immediately and contact your admin.\n"
+    )
+
+    payload = {
+        "sender": {"name": "OpsPortal", "email": from_email},
+        "to": [{"email": user.email, "name": user.full_name or user.email}],
+        "subject": "New sign-in to your OpsPortal account",
+        "textContent": body_text,
+        "htmlContent": body_html,
+    }
+
+    try:
+        resp = requests.post(
+            BREVO_SEND_URL,
+            json=payload,
+            headers={
+                "api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            timeout=10,
+        )
+        if resp.status_code >= 400:
+            logger.error(
+                "Brevo failed to send login alert to %s: %s %s",
+                user.email, resp.status_code, resp.text
+            )
+            return False
+        return True
+    except requests.RequestException:
+        logger.exception("Failed to reach Brevo for login alert %s", user.email)
         return False
