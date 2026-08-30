@@ -321,25 +321,58 @@ def get_device_info(request):
 
 def get_geo_location(ip):
     """Best-effort IP geolocation via ipapi.co's free HTTPS endpoint (Render
-    blocks plain HTTP/SMTP, so this only uses HTTPS APIs). Returns a
-    'City, Region, Country' string, or 'Unknown location' if it can't be
-    resolved (private/local IPs, rate limits, network errors, etc)."""
+    blocks plain HTTP/SMTP, so this only uses HTTPS APIs). Returns a dict
+    with as much precision as IP-based lookup can give — city/region/country,
+    postal code, lat/lon, and ISP — or None if it can't be resolved
+    (private/local IPs, rate limits, network errors, etc).
+
+    NOTE ON PRECISION: this is IP geolocation, which is accurate to roughly
+    city/neighbourhood level — it cannot pinpoint an exact address or GPS
+    position. True GPS-level precision would require the browser's
+    navigator.geolocation API, which prompts the user for location
+    permission on their device every time they sign in. That's intentionally
+    not done here: it's intrusive, most people would decline it, and storing
+    precise real-time location of staff on every login raises its own
+    privacy/legal questions. IP lookup is the standard, non-intrusive
+    approach used for login-alert emails."""
     if not ip or ip in ('127.0.0.1', 'localhost') or ip.startswith(('10.', '192.168.', '172.16.')):
-        return "Unknown location (local/private IP)"
+        return None
 
     try:
         resp = requests.get(IPAPI_URL.format(ip=ip), timeout=5)
         if resp.status_code != 200:
-            return "Unknown location"
+            return None
         data = resp.json()
         if data.get('error'):
-            return "Unknown location"
-        parts = [data.get('city'), data.get('region'), data.get('country_name')]
-        location = ", ".join(p for p in parts if p)
-        return location or "Unknown location"
+            return None
+        return {
+            'city': data.get('city'),
+            'region': data.get('region'),
+            'country': data.get('country_name'),
+            'postal': data.get('postal'),
+            'latitude': data.get('latitude'),
+            'longitude': data.get('longitude'),
+            'isp': data.get('org'),
+        }
     except (requests.RequestException, ValueError):
         logger.warning("Geolocation lookup failed for IP %s", ip)
+        return None
+
+
+def _format_location_text(geo):
+    """Plain-text 'City, Region, Postal, Country' line for the email body."""
+    if not geo:
         return "Unknown location"
+    parts = [geo.get('city'), geo.get('region'), geo.get('postal'), geo.get('country')]
+    text = ", ".join(p for p in parts if p)
+    return text or "Unknown location"
+
+
+def _maps_link(geo):
+    """Google Maps link pinned to the geolocated coordinates, if available."""
+    if not geo or geo.get('latitude') is None or geo.get('longitude') is None:
+        return None
+    return f"https://www.google.com/maps?q={geo['latitude']},{geo['longitude']}"
 
 
 def send_login_alert_email(user, request):
@@ -359,14 +392,24 @@ def send_login_alert_email(user, request):
 
     ip = get_client_ip(request)
     device = get_device_info(request)
-    location = get_geo_location(ip)
+    geo = get_geo_location(ip)
+    location_text = _format_location_text(geo)
+    maps_link = _maps_link(geo)
+    isp = geo.get('isp') if geo else None
     login_time = timezone.now().strftime("%B %d, %Y at %I:%M %p %Z") or timezone.now().isoformat()
 
     name = html.escape(user.full_name or user.email)
     safe_device = html.escape(device)
-    safe_location = html.escape(location)
+    safe_location = html.escape(location_text)
     safe_ip = html.escape(ip or "Unknown")
     safe_time = html.escape(login_time)
+    safe_isp = html.escape(isp) if isp else None
+    safe_maps_link = html.escape(maps_link) if maps_link else None
+
+    location_row = f'<strong>Location:</strong> {safe_location}'
+    if safe_maps_link:
+        location_row += f' &nbsp;<a href="{safe_maps_link}" style="color:#3B82F6;">(view on map)</a>'
+    isp_row = f'<br><strong>Network:</strong> {safe_isp}' if safe_isp else ''
 
     body_html = f"""
     <table cellpadding="0" cellspacing="0" width="100%" style="background:#F8FAFC;padding:32px 0;">
@@ -383,7 +426,7 @@ def send_login_alert_email(user, request):
             <table cellpadding="0" cellspacing="0" width="100%" style="background:#F1F5F9;border-radius:8px;">
               <tr><td style="padding:16px 20px;font-size:13px;color:#334155;font-family:sans-serif;line-height:2;">
                 <strong>Device:</strong> {safe_device}<br>
-                <strong>Location:</strong> {safe_location}<br>
+                {location_row}{isp_row}<br>
                 <strong>IP address:</strong> {safe_ip}<br>
                 <strong>Time:</strong> {safe_time}
               </td></tr>
@@ -402,8 +445,10 @@ def send_login_alert_email(user, request):
         f"Hi {user.full_name or user.email},\n\n"
         f"New sign-in to your OpsPortal account:\n\n"
         f"Device: {device}\n"
-        f"Location: {location}\n"
-        f"IP address: {ip or 'Unknown'}\n"
+        f"Location: {location_text}\n"
+        + (f"Map: {maps_link}\n" if maps_link else "")
+        + (f"Network: {isp}\n" if isp else "")
+        + f"IP address: {ip or 'Unknown'}\n"
         f"Time: {login_time}\n\n"
         f"If this wasn't you, change your password immediately and contact your admin.\n"
     )
