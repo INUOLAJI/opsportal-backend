@@ -65,6 +65,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     # the link emailed to them (see send_verification_email / verify_email).
     is_verified = models.BooleanField(default=True)
     date_joined = models.DateTimeField(auto_now_add=True)
+    # Cooldown guard for send_login_alert_email — without this, every sign-in
+    # (including repeated dev/testing logins) fires a fresh Brevo email, which
+    # is what got the Brevo account flagged for suspicious activity. See
+    # tokens.py send_login_alert_email.
+    last_login_alert_sent_at = models.DateTimeField(null=True, blank=True)
 
     objects = CustomUserManager()
 
@@ -359,4 +364,4 @@ class PlatformSettings(models.Model):
     def save(self, *args, **kwargs):
         if not self.company and not self.pk:
             self.pk = 1
-        super().save(*args, **kwargs)
+        super().save(*args, **kwargs)

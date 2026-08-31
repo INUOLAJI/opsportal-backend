@@ -1,5 +1,6 @@
 import html
 import logging
+from datetime import timedelta
 
 import requests
 from django.conf import settings
@@ -375,10 +376,18 @@ def _maps_link(geo):
     return f"https://www.google.com/maps?q={geo['latitude']},{geo['longitude']}"
 
 
+# Minimum gap between login-alert emails to the same user. Without this,
+# every sign-in (including repeated dev/testing logins in the same session)
+# fires a fresh Brevo email to the same recipient in quick succession — the
+# pattern that got this Brevo account flagged for suspicious activity.
+LOGIN_ALERT_COOLDOWN = timedelta(minutes=30)
+
+
 def send_login_alert_email(user, request):
-    """Emails the user a heads-up every time their account is signed into,
-    with device, location, IP and time — so staff/admins notice logins
-    that aren't theirs. Never raises: a failure here should never block or
+    """Emails the user a heads-up when their account is signed into, with
+    device, location, IP and time — so staff/admins notice logins that
+    aren't theirs. Skipped if an alert already went out to this user within
+    LOGIN_ALERT_COOLDOWN. Never raises: a failure here should never block or
     break the sign-in flow itself."""
     api_key = getattr(settings, 'BREVO_API_KEY', '')
     from_email = getattr(settings, 'BREVO_FROM_EMAIL', '')
@@ -387,6 +396,16 @@ def send_login_alert_email(user, request):
         logger.error(
             "Cannot send login alert to %s: BREVO_API_KEY / BREVO_FROM_EMAIL not configured.",
             user.email
+        )
+        return False
+
+    now = timezone.now()
+    if user.last_login_alert_sent_at and (now - user.last_login_alert_sent_at) < LOGIN_ALERT_COOLDOWN:
+        logger.info(
+            "Skipping login alert to %s: last one sent %.0fs ago (cooldown %.0fs).",
+            user.email,
+            (now - user.last_login_alert_sent_at).total_seconds(),
+            LOGIN_ALERT_COOLDOWN.total_seconds(),
         )
         return False
 
@@ -478,6 +497,8 @@ def send_login_alert_email(user, request):
                 user.email, resp.status_code, resp.text
             )
             return False
+        user.last_login_alert_sent_at = now
+        user.save(update_fields=['last_login_alert_sent_at'])
         return True
     except requests.RequestException:
         logger.exception("Failed to reach Brevo for login alert %s", user.email)
