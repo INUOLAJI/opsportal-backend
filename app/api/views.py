@@ -25,6 +25,7 @@ from .permissions import IsOwnerOrAdmin, IsAdminUser
 from .tokens import (
     email_verification_token, send_verification_email, password_reset_token,
     send_password_reset_email, send_login_alert_email,
+    send_task_assigned_email, send_task_completion_email,
 )
 import threading
 
@@ -68,6 +69,20 @@ def _broadcast_activity(activity):
     if company_id:
         _broadcast(f'company_{company_id}_admin_dashboard', 'activity.created', 'activity', data)
         _broadcast(f'company_{company_id}_staff_{activity.user_id}_dashboard', 'activity.created', 'activity', data)
+
+
+def _send_task_email_in_background(sender, *args):
+    try:
+        threading.Thread(target=sender, args=args, daemon=True).start()
+    except Exception:
+        logger.exception("Failed to dispatch task notification email")
+
+
+def _task_assignee_ids(task):
+    ids = set(task.assignees.values_list('id', flat=True))
+    if task.assignee_id:
+        ids.add(task.assignee_id)
+    return ids
 
 
 class AuthAnonRateThrottle(AnonRateThrottle):
@@ -486,6 +501,8 @@ class TaskListCreateView(generics.ListCreateAPIView):
         company = self.request.user.get_or_create_company()
         task = serializer.save(created_by=self.request.user, company=company)
         _broadcast_task('task.created', task)
+        for staff_member in User.objects.filter(id__in=_task_assignee_ids(task), role='staff'):
+            _send_task_email_in_background(send_task_assigned_email, task, staff_member)
 
 
 class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -517,8 +534,12 @@ class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
         return super().update(request, *args, **kwargs)
 
     def perform_update(self, serializer):
+        previous_assignee_ids = _task_assignee_ids(serializer.instance)
         task = serializer.save()
         _broadcast_task('task.updated', task)
+        new_assignee_ids = _task_assignee_ids(task) - previous_assignee_ids
+        for staff_member in User.objects.filter(id__in=new_assignee_ids, role='staff'):
+            _send_task_email_in_background(send_task_assigned_email, task, staff_member)
 
     def destroy(self, request, *args, **kwargs):
         if not _is_admin(request.user):
@@ -549,7 +570,7 @@ class RequestTaskCompletionView(generics.GenericAPIView):
         except Task.DoesNotExist:
             return Response({"detail": "Task not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if task.assignee_id != request.user.id:
+        if task.assignee_id != request.user.id and not task.assignees.filter(pk=request.user.pk).exists():
             return Response(
                 {"detail": "You can only request a completion review for tasks assigned to you."},
                 status=status.HTTP_403_FORBIDDEN
@@ -572,6 +593,12 @@ class RequestTaskCompletionView(generics.GenericAPIView):
             related_task=task
         )
         _broadcast_activity(activity)
+
+        admins = User.objects.filter(company=company).filter(
+            models.Q(role='admin') | models.Q(is_superuser=True)
+        ).exclude(pk=user.pk)
+        for admin in admins:
+            _send_task_email_in_background(send_task_completion_email, task, user, admin)
 
         serializer = self.get_serializer(task)
         return Response(serializer.data, status=status.HTTP_200_OK)

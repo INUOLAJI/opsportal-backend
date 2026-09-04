@@ -38,6 +38,99 @@ class PasswordResetTokenGenerator(PasswordResetTokenGenerator):
 password_reset_token = PasswordResetTokenGenerator()
 
 
+def _send_brevo_email(recipient, subject, text_content, html_content):
+  """Send a transactional email without allowing delivery failures to escape."""
+  api_key = getattr(settings, 'BREVO_API_KEY', '')
+  from_email = getattr(settings, 'BREVO_FROM_EMAIL', '')
+
+  if not api_key or not from_email:
+    logger.error(
+      "Cannot send email to %s: BREVO_API_KEY / BREVO_FROM_EMAIL not configured.",
+      recipient.email,
+    )
+    return False
+
+  payload = {
+    "sender": {"name": "OpsPortal", "email": from_email},
+    "to": [{"email": recipient.email, "name": recipient.full_name or recipient.email}],
+    "subject": subject,
+    "textContent": text_content,
+    "htmlContent": html_content,
+  }
+
+  try:
+    resp = requests.post(
+      BREVO_SEND_URL,
+      json=payload,
+      headers={
+        "api-key": api_key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      timeout=10,
+    )
+    if resp.status_code >= 400:
+      logger.error(
+        "Brevo failed to send email to %s: %s %s",
+        recipient.email, resp.status_code, resp.text,
+      )
+      return False
+    return True
+  except requests.RequestException:
+    logger.exception("Failed to reach Brevo for %s", recipient.email)
+    return False
+
+
+def send_task_assigned_email(task, recipient):
+  """Notify a staff member after an admin assigns them a task."""
+  name = html.escape(recipient.full_name or recipient.email)
+  title = html.escape(task.title)
+  due_date = task.due_date.strftime('%B %d, %Y at %I:%M %p') if task.due_date else 'No due date'
+  safe_due_date = html.escape(due_date)
+  subject = f"New task assigned: {task.title}"
+  text_content = (
+    f"Hi {recipient.full_name or recipient.email},\n\n"
+    f"An administrator assigned you a new task: {task.title}\n"
+    f"Due date: {due_date}\n\n"
+    "Sign in to OpsPortal to view the task.\n"
+  )
+  html_content = f"""
+  <table cellpadding="0" cellspacing="0" width="100%" style="background:#F8FAFC;padding:32px 0;">
+    <tr><td align="center"><table cellpadding="0" cellspacing="0" width="480" style="background:#FFFFFF;border-radius:12px;padding:32px;font-family:sans-serif;">
+    <tr><td><p style="margin:0 0 4px;color:#64748B;font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">OpsPortal</p>
+    <h1 style="margin:0 0 16px;color:#0F172A;font-size:20px;">New task assigned</h1>
+    <p style="margin:0 0 20px;color:#334155;font-size:14px;line-height:1.6;">Hi {name}, an administrator assigned you a task.</p>
+    <table cellpadding="0" cellspacing="0" width="100%" style="background:#F1F5F9;border-radius:8px;"><tr><td style="padding:16px 20px;color:#334155;font-size:14px;line-height:1.8;"><strong>Task:</strong> {title}<br><strong>Due:</strong> {safe_due_date}</td></tr></table>
+    <p style="margin:20px 0 0;color:#64748B;font-size:13px;">Sign in to OpsPortal to view the task.</p></td></tr>
+    </table></td></tr>
+  </table>"""
+  return _send_brevo_email(recipient, subject, text_content, html_content)
+
+
+def send_task_completion_email(task, staff_member, recipient):
+  """Notify an administrator when staff request completion review."""
+  admin_name = html.escape(recipient.full_name or recipient.email)
+  staff_name = html.escape(staff_member.full_name or staff_member.email)
+  title = html.escape(task.title)
+  subject = f"Task ready for review: {task.title}"
+  text_content = (
+    f"Hi {recipient.full_name or recipient.email},\n\n"
+    f"{staff_member.full_name or staff_member.email} marked the task '{task.title}' as ready for review.\n\n"
+    "Sign in to OpsPortal to review it.\n"
+  )
+  html_content = f"""
+  <table cellpadding="0" cellspacing="0" width="100%" style="background:#F8FAFC;padding:32px 0;">
+    <tr><td align="center"><table cellpadding="0" cellspacing="0" width="480" style="background:#FFFFFF;border-radius:12px;padding:32px;font-family:sans-serif;">
+    <tr><td><p style="margin:0 0 4px;color:#64748B;font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">OpsPortal</p>
+    <h1 style="margin:0 0 16px;color:#0F172A;font-size:20px;">Task ready for review</h1>
+    <p style="margin:0 0 20px;color:#334155;font-size:14px;line-height:1.6;">Hi {admin_name}, {staff_name} marked a task as complete and is waiting for your review.</p>
+    <table cellpadding="0" cellspacing="0" width="100%" style="background:#F1F5F9;border-radius:8px;"><tr><td style="padding:16px 20px;color:#334155;font-size:14px;"><strong>Task:</strong> {title}</td></tr></table>
+    <p style="margin:20px 0 0;color:#64748B;font-size:13px;">Sign in to OpsPortal to review it.</p></td></tr>
+    </table></td></tr>
+  </table>"""
+  return _send_brevo_email(recipient, subject, text_content, html_content)
+
+
 def send_password_reset_email(user):
     """Emails a one-time password reset link to the user."""
     uid = urlsafe_base64_encode(force_bytes(user.pk))
