@@ -595,16 +595,20 @@ class RequestTaskCompletionView(generics.GenericAPIView):
         _broadcast_activity(activity)
 
         admin_ids = set(
-            User.objects.filter(company=company).filter(
+            User.objects.filter(company_id=task.company_id).filter(
                 models.Q(role='admin') | models.Q(is_superuser=True)
             ).values_list('id', flat=True)
         )
+        # Always include the admin who created the task, even if their user
+        # record is no longer linked to the company record.
         if task.created_by_id and _is_admin(task.created_by):
             admin_ids.add(task.created_by_id)
 
-        admins = User.objects.filter(pk__in=admin_ids)
+        admins = User.objects.filter(pk__in=admin_ids, is_active=True).exclude(pk=user.pk)
+        email_sent = False
         for admin in admins:
-            sent = send_task_completion_email(task, user, admin)
+            sent = send_task_completion_email(task, request.user, admin)
+            email_sent = email_sent or sent
             if not sent:
                 logger.error(
                     "Task completion email was not sent for task %s to admin %s",
@@ -613,7 +617,9 @@ class RequestTaskCompletionView(generics.GenericAPIView):
                 )
 
         serializer = self.get_serializer(task)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        response_data = serializer.data
+        response_data['completion_email_sent'] = email_sent
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class TaskAttachmentView(generics.GenericAPIView):
